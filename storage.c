@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <assert.h>
 #include <time.h>
+#include <errno.h>
 
 #include "storage.h"
 #include "types.h"
@@ -161,6 +162,45 @@ write_directory(long startingBlock, directory* dir, size_t size) {
     free(data);
 }
 
+data_block*
+read_block(long blockId) {
+    data_block* newBlock = malloc(sizeof(data_block));
+    read_fs(blockId * BLOCK_SIZE, newBlock, BLOCK_SIZE);
+    return newBlock;
+}
+
+void*
+read_blocks(long currentBlockId, size_t size) {
+    data_block* currentBlock;
+    void* data = malloc(size);
+    long readData = 0;
+    while (currentBlockId) {
+        currentBlock = read_block(currentBlockId);
+        currentBlockId = currentBlock->next_block;
+        long leftToRead = size - readData;
+        long readSize = (leftToRead <= BLOCK_DATA_SIZE) ? leftToRead : BLOCK_DATA_SIZE;
+        memcpy(data + readData, &currentBlock->data, readSize);
+        readData += readSize;
+        free(currentBlock);
+    }
+    return data;
+}
+
+directory*
+read_directory(inode* node) {
+    void* data = read_blocks(node->block_num, node->size);
+    long pnum = *((long*) data);
+    long stringLen = node->size - sizeof(long);
+    directory* dir = create_directory(pnum);
+    if (stringLen > 0) {
+        char* paths = malloc(sizeof(char) * stringLen);
+        memcpy(paths, data + sizeof(long), stringLen);
+        dir->paths = paths;
+    }
+    free(data);
+    return dir;
+}
+
 void
 initialize_inode(inode* newInode, mode_t mode, uid_t uid, gid_t gid, dev_t rdev, off_t size) {
     newInode->mode = mode;
@@ -182,6 +222,14 @@ get_file_type(inode* node) {
     if (node->mode & S_IFDIR) {
         return DT_DIR;
     }
+    else {
+        return node->mode;
+    }
+}
+
+int
+is_directory(inode* node) {
+    return node->mode & S_IFDIR;
 }
 
 void
@@ -212,18 +260,41 @@ storage_init(const char* path)
     }
 }
 
-long
+inode*
 get_inode(const char* path) {
-    return 0;
+    inode* currentNode = &inodes[0];
+    // This should just happen once
+    while (*path && *path == '/') {
+        ++path;
+    }
+    char* nameStart = (char*) path;
+    while (*nameStart && is_directory(currentNode)) {
+        int nameLen = 0;
+        while (path[nameLen] && path[nameLen] != '/') {
+            ++nameLen;
+        }
+        char* fileName = malloc(sizeof(char) * (nameLen + 1));
+        strncpy(fileName, path, nameLen);
+        fileName[nameLen] = 0;
+        directory* dir = read_directory(currentNode);
+        long nextInode = get_file_inode(dir, fileName);
+        if (nextInode < 0) {
+            return (inode*) -ENOENT;
+        }
+        currentNode = &inodes[nextInode];
+        free(fileName);
+        nameStart += nameLen + 1;
+    }
+    return currentNode;
 }
 
 void
 get_dirent(const char* path, struct dirent* dir) {
-    long inodeId = get_inode(path);
-    dir->d_ino = inodeId;
+    inode* node = get_inode(path);
+    dir->d_ino = ((long)(node - inodes)) / sizeof(inode);
     dir->d_off = 0;
-    dir->d_reclen = inodes[inodeId].size;
-    dir->d_type = get_file_type(&inodes[inodeId]);
+    dir->d_reclen = node->size;
+    dir->d_type = get_file_type(node);
     char name[256] = "";
     memcpy(&dir->d_name, &name, 256);
 }
@@ -234,13 +305,25 @@ streq(const char* aa, const char* bb)
     return strcmp(aa, bb) == 0;
 }
 
-int
+long
 get_stat(const char* path, struct stat* st)
 {
-    long inodeId = get_inode(path);
-    inode* node = &inodes[inodeId];
+    inode* node = get_inode(path);
+    return get_stat_inode(node, st);
+}
+
+long
+get_stat_inode_id(long inodeId, struct stat* st) {
+    return get_stat_inode(&inodes[inodeId], st);
+}
+
+long
+get_stat_inode(inode* node, struct stat* st) {
+    if ((long) node <= 0) {
+        return (long) node;
+    }
     st->st_dev = 0;
-    st->st_ino = inodeId;
+    st->st_ino = ((long)(node - inodes)) / sizeof(inode);
     st->st_mode = node->mode;
     st->st_nlink = node->nlink;
     st->st_gid = node->gid;
@@ -259,8 +342,7 @@ get_stat(const char* path, struct stat* st)
 const char*
 get_data(const char* path)
 {
-    long inodeId = get_inode(path);
-    inode* node = &inodes[inodeId];
+    inode* node = get_inode(path);
     long blockNum = node->block_num;
     long readSize = node->size * sizeof(byte);
     byte* data = malloc(readSize);

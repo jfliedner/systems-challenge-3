@@ -2,6 +2,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <errno.h>
 #include "directory.h"
 
 char*
@@ -18,8 +19,11 @@ create_directory(long pnum) {
     return dir;
 }
 
-void
+int
 add_file(directory* dir, char* name, long inodeId) {
+    if (isdigit(*name)) {
+        return -EINVAL;
+    }
     if (dir->paths) {
         dir->paths = smart_cat(dir->paths, name);
     }
@@ -34,6 +38,7 @@ add_file(directory* dir, char* name, long inodeId) {
     snprintf(numBuf, n, "%lu", inodeId);
     dir->paths = smart_cat(dir->paths, numBuf);
     free(numBuf);
+    return 0;
 }
 
 void
@@ -56,6 +61,9 @@ remove_file(directory* dir, char* name) {
 
 long
 get_file_inode(directory* dir, char* name) {
+    if (!dir->paths) {
+        return -ENOENT;
+    }
     char* location = strstr(dir->paths, name);
     if (location != 0) {
         int index = location - dir->paths;
@@ -76,6 +84,55 @@ size_t
 size_directory(directory* dir) {
     long pathsLen = (dir->paths) ? strlen(dir->paths) : 0;
     return pathsLen + 1 + sizeof(long);
+}
+
+long
+get_num_files(directory* dir) {
+    char* paths = dir->paths;
+    if (!paths) {
+        return 0;
+    }
+    long counter = 0;
+    while(*paths) {
+        if (*paths == '/') {
+            ++counter;
+        }
+        ++paths;
+    }
+    return counter;
+}
+
+long
+get_file_names(directory* dir, char*** namesPointer) {
+    long numFiles = get_num_files(dir);
+    if (!numFiles) {
+        return numFiles;
+    }
+    *namesPointer = malloc(sizeof(char*) * numFiles);
+    char** names = *namesPointer;
+    int inName = 1;
+    long nameIndex = 0;
+    long currentChar = 0;
+    long currentLength = 0;
+    char* currentStart = dir->paths;
+    while (dir->paths[currentChar] != 0) {
+        if (dir->paths[currentChar] == '/') {
+            names[nameIndex] = malloc(sizeof(char) * (currentLength + 1));
+            strncpy(names[nameIndex], currentStart, currentLength);
+            ++nameIndex;
+            inName = 0;
+            currentLength = 0;
+        }
+        if (!inName && !isdigit(dir->paths[currentChar])) {
+            inName = 1;
+            currentStart = &dir->paths[currentChar];
+        }
+        if (inName) {
+            ++currentLength;
+        }
+        ++currentChar;
+    }
+    return numFiles;
 }
 
 void

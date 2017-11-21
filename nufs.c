@@ -7,12 +7,13 @@
 #include <dirent.h>
 #include <bsd/string.h>
 #include <assert.h>
+#include <stdlib.h>
 
 #define FUSE_USE_VERSION 26
 #include <fuse.h>
 
 #include "storage.h"
-
+#include "directory.h"
 
 // implementation for: man 2 access
 // Checks if a file exists.
@@ -30,6 +31,7 @@ nufs_getattr(const char *path, struct stat *st)
 {
     printf("getattr(%s)\n", path);
     int rv = get_stat(path, st);
+    printf("rv=%d\n", rv);
     if (rv == -1) {
         return -ENOENT;
     }
@@ -48,13 +50,29 @@ nufs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
     printf("readdir(%s)\n", path);
 
-    get_stat("/", &st);
+    int rv = get_stat(path, &st);
+    if (rv < 0) {
+        return rv;
+    }
     // filler is a callback that adds one item to the result
     // it will return non-zero when the buffer is full
     filler(buf, ".", &st, 0);
 
-    get_stat("/hello.txt", &st);
-    filler(buf, "hello.txt", &st, 0);
+    inode* node = get_inode(path);
+    if ((long) node <= 0) {
+        return (long) node;
+    }
+    if (!is_directory(node)) {
+        return 0;
+    }
+
+    directory* dir = read_directory(node);
+    char** fileNames;
+    long numFiles = get_file_names(dir, &fileNames);
+    for (long i = 0; i < numFiles; ++i) {
+        get_stat_inode_id(get_file_inode(dir, fileNames[i]), &st);
+        filler(buf, fileNames[i], &st, 0);
+    }
 
     return 0;
 }
@@ -189,4 +207,3 @@ main(int argc, char *argv[])
     nufs_init_ops(&nufs_ops);
     return fuse_main(argc, argv, &nufs_ops, NULL);
 }
-

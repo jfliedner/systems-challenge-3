@@ -5,6 +5,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include "directory.h"
 
 typedef struct inode {
     mode_t    mode;
@@ -20,8 +21,13 @@ typedef struct inode {
 } inode;
 
 void storage_init(const char* path);
-int         get_stat(const char* path, struct stat* st);
+long get_stat(const char* path, struct stat* st);
+long get_stat_inode_id(long inodeId, struct stat* st);
+long get_stat_inode(inode* node, struct stat* st);
 const char* get_data(const char* path);
+inode* get_inode(const char* path);
 void get_dirent(const char* path, struct dirent* dirInfo);
+directory* read_directory(inode* node);
+int is_directory(inode* node);
 
 #endif
