@@ -4,7 +4,7 @@
 
 void
 test_add_file() {
-  directory* test = create_directory();
+  directory* test = create_directory(0);
   add_file(test, "testfile.txt", 1);
   assert(strcmp(test->paths,"testfile.txt/1") == 0);
   add_file(test, "testfile2.txt", 2);
@@ -14,7 +14,7 @@ test_add_file() {
 
 void
 test_get_inode_num() {
-  directory* test = create_directory();
+  directory* test = create_directory(0);
   add_file(test, "testfile.txt", 1);
   assert(get_file_inode(test, "testfile.txt") == 1);
   add_file(test, "testfile2.txt", 2);
@@ -25,7 +25,7 @@ test_get_inode_num() {
 
 void
 test_remove_file() {
-  directory* test = create_directory();
+  directory* test = create_directory(0);
   add_file(test, "testfile.txt", 1);
   assert(strcmp(test->paths,"testfile.txt/1") == 0);
   add_file(test, "testfile2.txt", 2);

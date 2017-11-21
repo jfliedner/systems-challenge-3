@@ -1,5 +1,6 @@
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -10,6 +11,7 @@
 
 #include "storage.h"
 #include "types.h"
+#include "directory.h"
 
 #define DISK_SIZE 1024 * 1024
 #define BLOCK_SIZE 512
@@ -21,27 +23,16 @@
 #define INODE_BLOCKS 200
 #define INODE_COUNT (INODE_BLOCKS * BLOCK_SIZE) / sizeof(inode)
 #define FIRST_DATA_BLOCK INODE_BLOCKS + NUM_BLOCKS_FOR_USED_BLOCK_BITFIELD
+#define BLOCK_DATA_SIZE BLOCK_SIZE - sizeof(long)
 
 typedef struct data_block {
     long next_block;
-    byte data[BLOCK_SIZE - sizeof(long)];
+    byte data[BLOCK_DATA_SIZE];
 } data_block;
-
-typedef struct file_data {
-    const char* path;
-    int         mode;
-    const char* data;
-} file_data;
 
 int openFd = -1;
 byte usedBlocks[BLOCK_SIZE * NUM_BLOCKS_FOR_USED_BLOCK_BITFIELD];
 inode inodes[INODE_COUNT];
-
-static file_data file_table[] = {
-    {"/", 040755, 0},
-    {"/hello.txt", 0100644, "hello\n"},
-    {0, 0, 0},
-};
 
 void
 check_rv(int rv) {
@@ -80,6 +71,36 @@ take_block(long id) {
     write_fs(byte_id, &usedBlocks[byte_id], sizeof(byte));
 }
 
+void
+free_block(long blockId) {
+    long byte_id = blockId / (sizeof(byte) * 8);
+    byte bit_id = blockId % (sizeof(byte) * 8);
+    usedBlocks[byte_id] = usedBlocks[byte_id] & (((sizeof(byte) << 8) - 1) - (1 << bit_id));
+    printf("Freed byte %ld, bit %d\n", byte_id, bit_id);
+    write_fs(byte_id, &usedBlocks[byte_id], sizeof(byte));
+}
+
+data_block*
+get_data_block(long blockId) {
+    data_block* block = malloc(sizeof(byte) * BLOCK_SIZE);
+    read_fs(blockId * BLOCK_SIZE, block, BLOCK_SIZE);
+    return block;
+}
+
+void
+free_block_recursive(long blockId) {
+    data_block* nextBlock = get_data_block(blockId);
+    // Need to zero the next field in case this thing gets loaded again
+    unsigned long* l = malloc(sizeof(unsigned long));
+    *l = 0;
+    write_fs(blockId * BLOCK_SIZE, l, sizeof(unsigned long));
+    free(l);
+    free_block(blockId);
+    long nextBlockId = nextBlock->next_block;
+    free(nextBlock);
+    free_block_recursive(nextBlockId);
+}
+
 long
 get_next_block() {
     long blockId = 0;
@@ -91,6 +112,53 @@ get_next_block() {
     }
     take_block(blockId);
     return blockId;
+}
+
+long
+write_block(long blockId, void* data, size_t size, int needAnotherBlock) {
+    assert(size <= BLOCK_DATA_SIZE);
+    // This returns the next block if it already has one
+    data_block* block = get_data_block(blockId);
+    memcpy(&block->data, data, size);
+    long nextBlock = block->next_block;
+    if (nextBlock && !needAnotherBlock) {
+        free_block_recursive(nextBlock);
+    }
+    else if (!nextBlock && needAnotherBlock) {
+        nextBlock = get_next_block();
+    }
+    write_fs(blockId * BLOCK_SIZE, block, BLOCK_SIZE);
+    free(block);
+    return nextBlock;
+}
+
+void
+write_blocks(long startingBlock, void* data, size_t size) {
+    long requiredBlocks = size / BLOCK_DATA_SIZE + 1;
+    void* start = data;
+    long nextBlock = startingBlock;
+    while (requiredBlocks > 0 && size > 0) {
+        long writeSize = size;
+        int needAnotherBlock = writeSize > BLOCK_DATA_SIZE;
+        if (needAnotherBlock) {
+            writeSize = BLOCK_DATA_SIZE;
+        }
+        nextBlock = write_block(nextBlock, start, writeSize, needAnotherBlock);
+        size -= writeSize;
+        start += writeSize;
+        --requiredBlocks;
+    }
+}
+
+void
+write_directory(long startingBlock, directory* dir, size_t size) {
+    byte* data = malloc(size * sizeof(byte));
+    *data = dir->pnum;
+    if (dir->paths) {
+        memcpy(((void*) data + sizeof(long)), dir->paths, size - sizeof(long));
+    }
+    write_blocks(startingBlock, data, size);
+    free(data);
 }
 
 void
@@ -139,6 +207,8 @@ storage_init(const char* path)
     if (inodes[0].mode == 0) {
         initialize_inode(&inodes[0], S_IFDIR | S_IRWXU | S_IRWXG | S_IROTH | S_IWOTH, 0, 0, 4096, 0);
         write_fs(ROOT_INODE_OFFSET, &inodes[0], sizeof(inode));
+        directory* rootDir = create_directory(-1);
+        write_directory(inodes[0].block_num, rootDir, size_directory(rootDir));
     }
 }
 
@@ -162,23 +232,6 @@ static int
 streq(const char* aa, const char* bb)
 {
     return strcmp(aa, bb) == 0;
-}
-
-static file_data*
-get_file_data(const char* path) {
-    for (int ii = 0; 1; ++ii) {
-        file_data row = file_table[ii];
-
-        if (file_table[ii].path == 0) {
-            break;
-        }
-
-        if (streq(path, file_table[ii].path)) {
-            return &(file_table[ii]);
-        }
-    }
-
-    return 0;
 }
 
 int
@@ -206,10 +259,29 @@ get_stat(const char* path, struct stat* st)
 const char*
 get_data(const char* path)
 {
-    file_data* dat = get_file_data(path);
-    if (!dat) {
-        return 0;
+    long inodeId = get_inode(path);
+    inode* node = &inodes[inodeId];
+    long blockNum = node->block_num;
+    long readSize = node->size * sizeof(byte);
+    byte* data = malloc(readSize);
+
+    void* nextWriteAddr = data;
+    // Don't let people read the first data block
+    while (blockNum >= FIRST_DATA_BLOCK && readSize > 0) {
+        data_block* b = get_data_block(blockNum);
+        if (readSize >= BLOCK_DATA_SIZE) {
+            memcpy(nextWriteAddr, &b->data, BLOCK_DATA_SIZE);
+            readSize -= BLOCK_DATA_SIZE;
+            nextWriteAddr += BLOCK_DATA_SIZE;
+        }
+        else {
+            memcpy(nextWriteAddr, &b->data, readSize);
+            nextWriteAddr += readSize;
+            readSize = 0;
+        }
+        blockNum = b->next_block;
+        free(b);
     }
 
-    return dat->data;
+    return data;
 }

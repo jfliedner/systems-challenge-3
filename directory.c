@@ -11,8 +11,9 @@ smart_cat(char* str1, char* str2) {
 }
 
 directory*
-create_directory() {
+create_directory(long pnum) {
     directory* dir = malloc(sizeof(directory));
+    dir->pnum = pnum;
     dir->paths = 0;
     return dir;
 }
@@ -69,6 +70,12 @@ get_file_inode(directory* dir, char* name) {
         return atol(slash);
     }
     return 0;
+}
+
+size_t
+size_directory(directory* dir) {
+    long pathsLen = (dir->paths) ? strlen(dir->paths) : 0;
+    return pathsLen + 1 + sizeof(long);
 }
 
 void
