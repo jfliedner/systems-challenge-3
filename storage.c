@@ -13,6 +13,7 @@
 
 #define DISK_SIZE 1024 * 1024
 #define BLOCK_SIZE 512
+#define PAGE_SIZE 4096
 #define NUM_BLOCKS (DISK_SIZE / BLOCK_SIZE)
 #define NUM_BLOCKS_FOR_USED_BLOCK_BITFIELD (NUM_BLOCKS / (sizeof(byte) * 8) / BLOCK_SIZE + 1)
 #define ROOT_INODE_OFFSET (NUM_BLOCKS_FOR_USED_BLOCK_BITFIELD * BLOCK_SIZE)
@@ -102,10 +103,17 @@ initialize_inode(inode* newInode, mode_t mode, uid_t uid, gid_t gid, dev_t rdev,
     newInode->size = size;
     struct timespec spec;
     clock_gettime(CLOCK_REALTIME, &spec);
-    memcpy(&newInode->st_atim, &spec, sizeof(struct timespec));
-    memcpy(&newInode->st_mtim, &spec, sizeof(struct timespec));
-    memcpy(&newInode->st_ctim, &spec, sizeof(struct timespec));
+    memcpy(&newInode->atim, &spec, sizeof(struct timespec));
+    memcpy(&newInode->mtim, &spec, sizeof(struct timespec));
+    memcpy(&newInode->ctim, &spec, sizeof(struct timespec));
     newInode->block_num = get_next_block();
+}
+
+int
+get_file_type(inode* node) {
+    if (node->mode & S_IFDIR) {
+        return DT_DIR;
+    }
 }
 
 void
@@ -136,7 +144,6 @@ storage_init(const char* path)
 
 long
 get_inode(const char* path) {
-    // just return root for now
     return 0;
 }
 
@@ -146,7 +153,7 @@ get_dirent(const char* path, struct dirent* dir) {
     dir->d_ino = inodeId;
     dir->d_off = 0;
     dir->d_reclen = inodes[inodeId].size;
-    dir->d_type = DT_DIR;
+    dir->d_type = get_file_type(&inodes[inodeId]);
     char name[256] = "";
     memcpy(&dir->d_name, &name, 256);
 }
@@ -177,20 +184,22 @@ get_file_data(const char* path) {
 int
 get_stat(const char* path, struct stat* st)
 {
-    file_data* dat = get_file_data(path);
-    if (!dat) {
-        return -1;
-    }
+    long inodeId = get_inode(path);
+    inode* node = &inodes[inodeId];
+    st->st_dev = 0;
+    st->st_ino = inodeId;
+    st->st_mode = node->mode;
+    st->st_nlink = node->nlink;
+    st->st_gid = node->gid;
+    st->st_uid = node->uid;
+    st->st_rdev = node->rdev;
+    st->st_size = node->size;
+    st->st_blksize = (node->size / PAGE_SIZE) + 1;
+    st->st_blocks = (node->size / BLOCK_SIZE) + 1;
+    memcpy(&st->st_atim, &node->atim, sizeof(struct timespec));
+    memcpy(&st->st_mtim, &node->mtim, sizeof(struct timespec));
+    memcpy(&st->st_ctim, &node->ctim, sizeof(struct timespec));
 
-    memset(st, 0, sizeof(struct stat));
-    st->st_uid  = getuid();
-    st->st_mode = dat->mode;
-    if (dat->data) {
-        st->st_size = strlen(dat->data);
-    }
-    else {
-        st->st_size = 0;
-    }
     return 0;
 }
 

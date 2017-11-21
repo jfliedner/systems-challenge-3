@@ -13,9 +13,9 @@ typedef struct inode {
     gid_t     gid;
     dev_t     rdev;
     off_t     size;
-    struct timespec st_atim;
-    struct timespec st_mtim;
-    struct timespec st_ctim;
+    struct timespec atim;
+    struct timespec mtim;
+    struct timespec ctim;
     long block_num;
 } inode;
 
