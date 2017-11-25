@@ -98,7 +98,7 @@ void configure_root() {
   }
 
   inode* root = &meta->root;
-  root->mode = S_IFDIR | S_IRWXU | S_IRWXG | S_IROTH | S_IWOTH;
+  root->mode = S_IFDIR | S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH;
   root->nlink = 1;
   root->uid = 0000;
   root->gid = 0000;
@@ -166,11 +166,20 @@ long get_stat_inode(inode* node, struct stat* st) {
   return 0;
 }
 
-const char*
+read_data*
 get_data(const char* path) {
   inode* node = get_inode(path);
-  //size_t size = node->size;
-  return read_block(node->direct, node->size);
+  read_data* data = malloc(sizeof(read_data));
+  data->type = node->mode;
+  data->size = node->size;
+  data->data = (byte*) read_block(node->direct, node->size);
+  return data;
+}
+
+void
+free_read_data(read_data* data) {
+  free(data->data);
+  free(data);
 }
 
 int
@@ -200,6 +209,7 @@ get_dirent(const char* path, struct dirent* dir) {
 }
 
 int
-is_directory(const char* node) {
-  return 0;
+is_directory(const char* path) {
+  inode* node = get_inode(path);
+  return node->mode & S_IFDIR;
 }

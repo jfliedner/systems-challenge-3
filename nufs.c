@@ -62,8 +62,8 @@ nufs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
       return -1;
     }
 
-    const char* data = get_data(path);
-    directory* dir = deserialize((void*) data, sizeof(data));
+    read_data* data = get_data(path);
+    directory* dir = deserialize((void*) data->data, data->size);
     char** fileNames;
     long numFiles = get_file_names(dir, &fileNames);
     for (long i = 0; i < numFiles; ++i) {
@@ -146,15 +146,10 @@ int
 nufs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
 {
     printf("read(%s, %ld bytes, @%ld)\n", path, size, offset);
-    const char* data = get_data(path);
+    read_data* data = get_data(path);
 
-    int len = strlen(data) + 1;
-    if (size < len) {
-        len = size;
-    }
-
-    strlcpy(buf, data, len);
-    return len;
+    strlcpy(buf, data->data, data->size);
+    return data->size;
 }
 
 // Actually write data

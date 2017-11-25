@@ -28,13 +28,21 @@ typedef struct inode {
     int indirect;
 } inode;
 
+typedef struct read_data {
+  mode_t type;
+  size_t size;
+  unsigned char* data;
+} read_data;
+
 void storage_init(const char* path);
 long get_stat(const char* path, struct stat* st);
 long get_stat_inode_id(long inodeId, struct stat* st);
 long get_stat_inode(inode* node, struct stat* st);
-const char* get_data(const char* path);
+read_data* get_data(const char* path);
 inode* get_inode(const char* path);
 void get_dirent(const char* path, struct dirent* dirInfo);
 int is_directory(const char* path);
+
+void free_read_data(read_data* data);
 
 #endif
