@@ -67,6 +67,15 @@ write_to_block(int blockId, void* data, size_t size) {
   return writeSize;
 }
 
+const char*
+read_block(int blockId, size_t size) {
+  void* blockAddress = get_block_address(blockId);
+  size_t readSize = (size >= BLOCK_SIZE) ? BLOCK_SIZE : size;
+  const char* outData = malloc(sizeof(char) * readSize);
+  memcpy((void*) outData, blockAddress, readSize);
+  return outData;
+}
+
 void
 write_to_inode(inode* node, void* data, size_t size) {
   size_t oldSize = node->size;
@@ -104,7 +113,6 @@ void configure_root() {
   root->indirect = 0;
   directory* rootDirectory = create_directory("", root->direct, -1);
   void* serialData =  serialize(rootDirectory);
-  printf("Writing inode\n");
   write_to_inode(root, serialData, get_size_directory(rootDirectory));
 }
 
@@ -118,34 +126,80 @@ void storage_init(const char* path) {
   configure_root();
 }
 
-long get_stat(const char* path, struct stat* st) {
+inode*
+get_inode(const char* path) {
+  return &meta->root;
+}
 
+long get_stat(const char* path, struct stat* st) {
+  inode* node = get_inode(path);
+  return get_stat_inode(node, st);
 }
 
 long get_stat_inode_id(long inodeId, struct stat* st) {
-
+  return get_stat_inode(&meta->inodes[inodeId], st);
 }
 
 long get_stat_inode(inode* node, struct stat* st) {
+  if ((long) node <= 0) {
+      return (long) node;
+  }
+  long diff = (long) node - (long) meta->inodes;
+  // Fudge a little on root
+  if (diff < 0) {
+    diff = 0;
+  }
+  st->st_dev = 0;
+  st->st_ino = diff / sizeof(inode);
+  st->st_mode = node->mode;
+  st->st_nlink = node->nlink;
+  st->st_gid = node->gid;
+  st->st_uid = node->uid;
+  st->st_rdev = node->rdev;
+  st->st_size = node->size;
+  st->st_blksize = BLOCK_SIZE;
+  st->st_blocks = (node->size / BLOCK_SIZE) + 1;
+  memcpy(&st->st_atim, &node->atim, sizeof(struct timespec));
+  memcpy(&st->st_mtim, &node->mtim, sizeof(struct timespec));
+  memcpy(&st->st_ctim, &node->ctim, sizeof(struct timespec));
 
+  return 0;
 }
 
-const char* get_data(const char* path) {
-
+const char*
+get_data(const char* path) {
+  inode* node = get_inode(path);
+  //size_t size = node->size;
+  return read_block(node->direct, node->size);
 }
 
-inode* get_inode(const char* path) {
-
+int
+get_file_type(inode* node) {
+    if (node->mode & S_IFDIR) {
+        return DT_DIR;
+    }
+    else {
+        return node->mode;
+    }
 }
 
-void get_dirent(const char* path, struct dirent* dirInfo) {
-
+void
+get_dirent(const char* path, struct dirent* dir) {
+  inode* node = get_inode(path);
+  long diff = (long) node - (long) meta->inodes;
+  // Fudge a little on root
+  if (diff < 0) {
+    diff = 0;
+  }
+  dir->d_ino = diff / sizeof(inode);
+  dir->d_off = 0;
+  dir->d_reclen = node->size;
+  dir->d_type = get_file_type(node);
+  char name[256] = "";
+  memcpy(&dir->d_name, &name, 256);
 }
 
-directory* read_directory(inode* node) {
-
-}
-
-int is_directory(inode* node) {
-
+int
+is_directory(const char* node) {
+  return 0;
 }

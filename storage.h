@@ -35,7 +35,6 @@ long get_stat_inode(inode* node, struct stat* st);
 const char* get_data(const char* path);
 inode* get_inode(const char* path);
 void get_dirent(const char* path, struct dirent* dirInfo);
-directory* read_directory(inode* node);
-int is_directory(inode* node);
+int is_directory(const char* path);
 
 #endif

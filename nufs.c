@@ -57,15 +57,13 @@ nufs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     // it will return non-zero when the buffer is full
     filler(buf, ".", &st, 0);
 
-    inode* node = get_inode(path);
-    if ((long) node <= 0) {
-        return (long) node;
-    }
-    if (!is_directory(node)) {
-        return 0;
+    if (!is_directory(path)) {
+      // TODO: real value here
+      return -1;
     }
 
-    directory* dir = read_directory(node);
+    const char* data = get_data(path);
+    directory* dir = deserialize((void*) data, sizeof(data));
     char** fileNames;
     long numFiles = get_file_names(dir, &fileNames);
     for (long i = 0; i < numFiles; ++i) {
@@ -73,6 +71,8 @@ nufs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
         filler(buf, fileNames[i], &st, 0);
     }
 
+    free((void*) data);
+    free_directory(dir);
     return 0;
 }
 
