@@ -127,7 +127,7 @@ get_file_inode(directory* dir, char* name) {
         free(slash);
         return val;
     }
-    return 0;
+    return -1;
 }
 
 size_t

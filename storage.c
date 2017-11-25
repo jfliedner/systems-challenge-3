@@ -126,13 +126,54 @@ void storage_init(const char* path) {
   configure_root();
 }
 
+read_data*
+read_inode(inode* node) {
+  read_data* data = malloc(sizeof(read_data));
+  data->type = node->mode;
+  data->size = node->size;
+  data->data = (byte*) read_block(node->direct, node->size);
+  return data;
+}
+
 inode*
 get_inode(const char* path) {
-  return &meta->root;
+  inode* currentNode = &meta->root;
+  if (strcmp(path, "/") == 0) {
+    return currentNode;
+  }
+  char* start = (char*)path + 1;
+  char* slash = strstr(start, "/");
+  int length;
+  if (slash) {
+    length = slash - start;
+  }
+  else {
+    length = strlen(start);
+  }
+  char* name = malloc(sizeof(char) * (length + 1));
+  strncpy(name, start, length);
+  name[length] = 0;
+  read_data* data = read_inode(currentNode);
+  directory* dir = deserialize(data->data, data->size);
+  free_read_data(data);
+  long inodeId = get_file_inode(dir, name);
+  free(name);
+  free_directory(dir);
+  if (inodeId < 0) {
+    return (inode*) -1;
+  }
+  currentNode = &meta->inodes[inodeId];
+  return currentNode;
 }
 
 long get_stat(const char* path, struct stat* st) {
+  if (!path || *path != '/') {
+    return -1;
+  }
   inode* node = get_inode(path);
+  if ((long) node < 0) {
+    return -1;
+  }
   return get_stat_inode(node, st);
 }
 
@@ -168,12 +209,14 @@ long get_stat_inode(inode* node, struct stat* st) {
 
 read_data*
 get_data(const char* path) {
+  if (!path || *path != '/') {
+    return (read_data*) -1;
+  }
   inode* node = get_inode(path);
-  read_data* data = malloc(sizeof(read_data));
-  data->type = node->mode;
-  data->size = node->size;
-  data->data = (byte*) read_block(node->direct, node->size);
-  return data;
+  if ((long) node < 0) {
+    return (read_data*) -1;
+  }
+  return read_inode(node);
 }
 
 void
@@ -192,9 +235,15 @@ get_file_type(inode* node) {
     }
 }
 
-void
+long
 get_dirent(const char* path, struct dirent* dir) {
+  if (!path || *path != '/') {
+    return -1;
+  }
   inode* node = get_inode(path);
+  if ((long) node < 0) {
+    return -1;
+  }
   long diff = (long) node - (long) meta->inodes;
   // Fudge a little on root
   if (diff < 0) {
@@ -206,10 +255,17 @@ get_dirent(const char* path, struct dirent* dir) {
   dir->d_type = get_file_type(node);
   char name[256] = "";
   memcpy(&dir->d_name, &name, 256);
+  return 0;
 }
 
 int
 is_directory(const char* path) {
+  if (!path || *path != '/') {
+    return 0;
+  }
   inode* node = get_inode(path);
+  if ((long) node < 0) {
+    return -1;
+  }
   return node->mode & S_IFDIR;
 }

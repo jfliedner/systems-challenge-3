@@ -40,7 +40,7 @@ long get_stat_inode_id(long inodeId, struct stat* st);
 long get_stat_inode(inode* node, struct stat* st);
 read_data* get_data(const char* path);
 inode* get_inode(const char* path);
-void get_dirent(const char* path, struct dirent* dirInfo);
+long get_dirent(const char* path, struct dirent* dirInfo);
 int is_directory(const char* path);
 
 void free_read_data(read_data* data);
