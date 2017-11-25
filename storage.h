@@ -7,6 +7,13 @@
 #include <dirent.h>
 #include "directory.h"
 
+#define STARTING_BLOCKS 12
+#define DISK_SIZE 1024 * 1024
+#define BLOCK_SIZE 4096
+#define INODE_COUNT 2048
+#define BLOCK_COUNT DISK_SIZE / BLOCK_SIZE
+#define BIG_SIZE BLOCK_SIZE * STARTING_BLOCKS
+
 typedef struct inode {
     mode_t    mode;
     nlink_t   nlink;
@@ -17,7 +24,8 @@ typedef struct inode {
     struct timespec atim;
     struct timespec mtim;
     struct timespec ctim;
-    long block_num;
+    int direct;
+    int indirect;
 } inode;
 
 void storage_init(const char* path);

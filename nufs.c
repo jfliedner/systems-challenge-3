@@ -31,7 +31,6 @@ nufs_getattr(const char *path, struct stat *st)
 {
     printf("getattr(%s)\n", path);
     int rv = get_stat(path, st);
-    printf("rv=%d\n", rv);
     if (rv == -1) {
         return -ENOENT;
     }

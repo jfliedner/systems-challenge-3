@@ -3,20 +3,51 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
+#include <assert.h>
 #include "directory.h"
 
 char*
 smart_cat(char* str1, char* str2) {
+    if (!str2) {
+        return str1;
+    }
+    if (!str1) {
+        str1 = malloc(sizeof(char) * (strlen(str2) + 1));
+        return str1;
+    }
     str1 = realloc(str1, strlen(str1) + strlen(str2));
     return strcat(str1, str2);
 }
 
+char* num_to_string(long number) {
+    int n = snprintf(NULL, 0, "%lu", number) + 1;
+    char* numBuf = malloc(sizeof(char) * n);
+    snprintf(numBuf, n, "%lu", number);
+    return numBuf;
+}
+
 directory*
-create_directory(long pnum) {
+create_directory(char* name, long inodeId, long pnum) {
     directory* dir = malloc(sizeof(directory));
     dir->pnum = pnum;
+    dir->inodeId = inodeId;
     dir->paths = 0;
+    add_file(dir, name, inodeId);
     return dir;
+}
+
+char*
+get_file_start(directory* dir) {
+    char* start = strstr(dir->paths, "/");
+    while (start && (*start == '/' || isdigit(*start))) {
+        ++start;
+    }
+    if (*start) {
+      return start;
+    }
+    else {
+      return 0;
+    }
 }
 
 int
@@ -29,44 +60,61 @@ add_file(directory* dir, char* name, long inodeId) {
     }
     else {
         int len = strlen(name);
-        dir->paths = malloc(len * sizeof(char));
+        dir->paths = malloc((len + 1) * sizeof(char));
         strcpy(dir->paths, name);
     }
     dir->paths = smart_cat(dir->paths, "/");
-    int n = snprintf(NULL, 0, "%lu", inodeId) + 1;
-    char* numBuf = malloc(sizeof(char) * n);
-    snprintf(numBuf, n, "%lu", inodeId);
+    char* numBuf = num_to_string(inodeId);
     dir->paths = smart_cat(dir->paths, numBuf);
     free(numBuf);
     return 0;
 }
 
+char*
+get_name(directory* dir) {
+    char* start = get_file_start(dir);
+    if (!start) {
+      return 0;
+    }
+    char* firstSlash = strstr(start, "/");
+    long length = firstSlash - start;
+    char* name = malloc(sizeof(char) * (length + 1));
+    strncpy(name, start, length);
+    name[length] = 0;
+    return name;
+}
+
 void
 remove_file(directory* dir, char* name) {
-    char* location = strstr(dir->paths, name);
+    char* start = get_file_start(dir);
+    if (!start) {
+      return;
+    }
+    char* location = strstr(start, name);
     if (location != NULL) {
-        int index = location - dir->paths;
+        int index = location - start;
         int slashSeen = 0;
-        while (dir->paths[index] && (!slashSeen || isdigit(dir->paths[index]))) {
-            if (dir->paths[index] == '/') {
+        while (start[index] && (!slashSeen || isdigit(start[index]))) {
+            if (start[index] == '/') {
                slashSeen = 1;
             }
-            dir->paths[index] = 0;
+            start[index] = 0;
             ++index;
-            location = &dir->paths[index];
+            location = &start[index];
         }
-        strcat(dir->paths, location);
+        strcat(start, location);
     }
 }
 
 long
 get_file_inode(directory* dir, char* name) {
-    if (!dir->paths) {
+    char* start = get_file_start(dir);
+    if (!start) {
         return -ENOENT;
     }
-    char* location = strstr(dir->paths, name);
+    char* location = strstr(start, name);
     if (location != 0) {
-        int index = location - dir->paths;
+        int index = location - start;
         char* slash = strstr(location, "/");
         char* inodeNum = slash + 1;
         int len = 0;
@@ -75,20 +123,21 @@ get_file_inode(directory* dir, char* name) {
         }
         slash = malloc(sizeof(char) * (len + 1));
         strncpy(slash, inodeNum, len);
-        return atol(slash);
+        long val = atol(slash);
+        free(slash);
+        return val;
     }
     return 0;
 }
 
 size_t
-size_directory(directory* dir) {
-    long pathsLen = (dir->paths) ? strlen(dir->paths) : 0;
-    return pathsLen + 1 + sizeof(long);
+get_size_directory(directory* dir) {
+    return sizeof(int) + sizeof(int) + (1 + strlen(dir->paths)) * sizeof(char);
 }
 
 long
 get_num_files(directory* dir) {
-    char* paths = dir->paths;
+    char* paths = get_file_start(dir);
     if (!paths) {
         return 0;
     }
@@ -114,18 +163,19 @@ get_file_names(directory* dir, char*** namesPointer) {
     long nameIndex = 0;
     long currentChar = 0;
     long currentLength = 0;
-    char* currentStart = dir->paths;
-    while (dir->paths[currentChar] != 0) {
-        if (dir->paths[currentChar] == '/') {
+    char* fileNameStart = get_file_start(dir);
+    char* currentStart = fileNameStart;
+    while (fileNameStart[currentChar] != 0) {
+        if (fileNameStart[currentChar] == '/') {
             names[nameIndex] = malloc(sizeof(char) * (currentLength + 1));
             strncpy(names[nameIndex], currentStart, currentLength);
             ++nameIndex;
             inName = 0;
             currentLength = 0;
         }
-        if (!inName && !isdigit(dir->paths[currentChar])) {
+        if (!inName && !isdigit(fileNameStart[currentChar])) {
             inName = 1;
-            currentStart = &dir->paths[currentChar];
+            currentStart = &fileNameStart[currentChar];
         }
         if (inName) {
             ++currentLength;
@@ -139,4 +189,31 @@ void
 free_directory(directory* dir) {
     free(dir->paths);
     free(dir);
+}
+
+void*
+serialize(directory* dir) {
+    size_t size = get_size_directory(dir);
+    //long stringLen = strlen(dir->paths) + 1
+    void* writeArray = malloc(size);
+    memcpy(writeArray, &dir->pnum, sizeof(int));
+    memcpy(writeArray + sizeof(int), &dir->inodeId, sizeof(int));
+    long twoLong = sizeof(int) + sizeof(int);
+    memcpy(writeArray + twoLong, dir->paths, size - twoLong);
+    return writeArray;
+}
+
+directory*
+deserialize(void* addr, size_t size) {
+    int twoInt = sizeof(int) + sizeof(int);
+    assert(size >= twoInt + 1);
+    int* intPtr = addr;
+    directory* dir = malloc(sizeof(directory));
+    dir->pnum = intPtr[0];
+    dir->inodeId = intPtr[1];
+    long dataSize = size - twoInt;
+    dir->paths = malloc(sizeof(char) * dataSize);
+    void* dataAddr = addr + twoInt;
+    memcpy(dir->paths, dataAddr, dataSize);
+    return dir;
 }

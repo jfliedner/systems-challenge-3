@@ -9,7 +9,7 @@ LDLIBS := `pkg-config fuse --libs` -lbsd
 nufs: directory.c nufs.c storage.c 
 	gcc $(CFLAGS) -o nufs $^ $(LDLIBS)
 
-test-code: test.c directory.c
+test-code: test.c directory.c storage.c
 	gcc $(CFLAGS) -o test $^ $(LDLIBS)
 
 clean: unmount
@@ -25,7 +25,7 @@ unmount:
 	fusermount -u mnt || true
 
 test: nufs
-	perl test.t
+	perl test.pl
 
 gdb: nufs
 	mkdir -p mnt || true
