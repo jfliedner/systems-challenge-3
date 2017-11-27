@@ -8,6 +8,7 @@
 #include <bsd/string.h>
 #include <assert.h>
 #include <stdlib.h>
+#include <time.h>
 
 #define FUSE_USE_VERSION 26
 #include <fuse.h>
@@ -29,9 +30,11 @@ nufs_access(const char *path, int mask)
 int
 nufs_getattr(const char *path, struct stat *st)
 {
+    // TODO: Might want to make this just return the value gotten from get_stat
+    // would require returning the right error codes
     printf("getattr(%s)\n", path);
     int rv = get_stat(path, st);
-    if (rv == -1) {
+    if (rv < 0) {
         return -ENOENT;
     }
     else {
@@ -56,11 +59,14 @@ nufs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     }
     // filler is a callback that adds one item to the result
     // it will return non-zero when the buffer is full
-    filler(buf, ".", &st, 0);
 
     if (!is_directory(path)) {
-      // TODO: real value here
-      return -1;
+      // TODO: get the basename here
+      filler(buf, path, &st, 0);
+      return 0;
+    }
+    else {
+      filler(buf, ".", &st, 0);
     }
 
     read_data* data = get_data(path);
@@ -83,7 +89,11 @@ int
 nufs_mknod(const char *path, mode_t mode, dev_t rdev)
 {
     printf("mknod(%s, %04o)\n", path, mode);
-    return -1;
+    long rv = (long) get_new_inode(path, mode, rdev);
+    if (rv < 0) {
+      return rv;
+    }
+    return 0;
 }
 
 // most of the following callbacks implement
@@ -139,7 +149,13 @@ int
 nufs_open(const char *path, struct fuse_file_info *fi)
 {
     printf("open(%s)\n", path);
-    return 0;
+    inode* node = get_inode(path);
+    if ((long) node < 0) {
+      return (long) node;
+    }
+    else {
+      return 0;
+    }
 }
 
 // Actually read data
@@ -150,7 +166,7 @@ nufs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_fi
     read_data* data = get_data(path);
 
     strlcpy(buf, data->data, data->size);
-    return data->size;
+    return data->size + 1;
 }
 
 // Actually write data
@@ -158,18 +174,24 @@ int
 nufs_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
 {
     printf("write(%s, %ld bytes, @%ld)\n", path, size, offset);
-    return -1;
+    inode* node = get_or_create_inode(path);
+    int writeSize = write_to_inode(node, (void*) buf, size, offset);
+    return writeSize;
 }
 
 // Update the timestamps on a file or directory.
 int
 nufs_utimens(const char* path, const struct timespec ts[2])
 {
-    //int rv = storage_set_time(path, ts);
-    int rv = -1;
-  printf("utimens(%s, [%ld, %ld; %ld %ld]) -> %d\n",
-           path, ts[0].tv_sec, ts[0].tv_nsec, ts[1].tv_sec, ts[1].tv_nsec, rv);
-	return rv;
+  inode* node = get_inode(path);
+  if ((long) node < 0) {
+    return (long) node;
+  }
+  // inodes are mapped straight into memory, so updating the inode should
+  // update the memory
+  memcpy(&node->atim, &ts[0], sizeof(struct timespec));
+  memcpy(&node->mtim, &ts[1], sizeof(struct timespec));
+	return 0;
 }
 
 void

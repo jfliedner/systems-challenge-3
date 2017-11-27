@@ -76,6 +76,14 @@ test_get_size() {
 }
 
 void
+test_dot_names() {
+  directory* dir = create_directory("", 0, 1);
+  add_file(dir, ".test.swp", 1);
+  assert(get_file_inode(dir, ".test.swp") == 1);
+  free_directory(dir);
+}
+
+void
 test_directory() {
   test_add_file();
   test_get_inode_num();
@@ -83,8 +91,9 @@ test_directory() {
   test_num_files();
   test_get_file_names();
   test_get_size();
+  test_dot_names();
 }
-
+/*
 void
 test_root() {
   inode* node = get_inode("/");
@@ -92,11 +101,11 @@ test_root() {
   assert(strcmp(dir->paths, "/0") == 0);
   free_directory(dir);
 }
-
+*/
 void
 test_storage() {
   storage_init("test_fs");
-  test_root();
+  //test_root();
 }
 
 int main() {
