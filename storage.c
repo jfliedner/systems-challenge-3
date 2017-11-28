@@ -240,11 +240,7 @@ get_blocks(inode* node, int currentCount, int desiredCount) {
 }
 
 int
-inode_truncate(const char* path, off_t size) {
-  inode* node = get_inode(path);
-  if ((long) node < 0) {
-    return (long) node;
-  }
+change_inode_size(inode* node, off_t size) {
   int currentBlockCount = node->size / BLOCK_SIZE + 1;
   int desiredBlockCount = size / BLOCK_SIZE + 1;
   int rv = 0;
@@ -263,45 +259,61 @@ inode_truncate(const char* path, off_t size) {
 }
 
 int
+inode_truncate(const char* path, off_t size) {
+  inode* node = get_inode(path);
+  if ((long) node < 0) {
+    return (long) node;
+  }
+  return change_inode_size(node, size);
+}
+
+int
+write_to_blocks(int* blockIds, int numBlocks, void* data, size_t size, off_t offset) {
+  int blockIndex = offset / BLOCK_SIZE;
+  if (blockIndex >= numBlocks) {
+    // TODO: better error value
+    return -1;
+  }
+  int blockOffset = offset % BLOCK_SIZE;
+  int writeSize = (size < BLOCK_SIZE - offset) ? size : BLOCK_SIZE - offset;
+  int writtenBytes = write_to_block(blockIds[blockIndex], data, writeSize, blockOffset);
+  ++blockIndex;
+  blockOffset = 0;
+  // While we still have blocks to write on and things to write to blocks
+  while (blockIndex < numBlocks && writtenBytes < size) {
+    writeSize = (size - writtenBytes < BLOCK_SIZE) ? size - writtenBytes : BLOCK_SIZE;
+    writtenBytes += write_to_block(blockIds[blockIndex], data + writtenBytes, writeSize, blockOffset);
+    ++blockIndex;
+  }
+  return writtenBytes;
+}
+
+int
 write_to_inode(inode* node, void* data, size_t size, off_t offset) {
   size_t oldSize = node->size;
   if (node->direct == 0) {
     node->direct = get_next_block();
   }
   assert(node->direct >= meta->root.direct);
-  size_t writtenBytes = 0;
-  if (size + offset > BLOCK_SIZE && node->indirect == 0) {
-    // Make sure the block is initialized to zero because that's
-    // going to matter
-    node->indirect = get_next_block();
-    void* data = malloc(BLOCK_SIZE);
-    memset(data, 0, BLOCK_SIZE);
-    write_to_block(node->indirect, data, BLOCK_SIZE, 0);
-    free(data);
-  }
-  int* indirectBlock = (int*) read_block(node->indirect, BLOCK_SIZE);
-  int blockId = offset / BLOCK_SIZE;
-  int startingBlockOffset = offset % BLOCK_SIZE;
-  while (writtenBytes < size) {
-    int blockLow = blockId * BLOCK_SIZE;
-    int blockHigh = blockLow + BLOCK_SIZE;
-    if (blockId == 0) {
-      int writeSize = (size + offset > blockHigh) ? blockHigh - startingBlockOffset : size;
-      writtenBytes += write_to_block(node->direct, data, writeSize, startingBlockOffset);
+  if (size + offset > node->size) {
+    int rv = change_inode_size(node, size + offset);
+    if (rv < 0) {
+      return rv;
     }
-    else {
-      int writeSize = (size - writtenBytes >= BLOCK_SIZE) ? BLOCK_SIZE : size - writtenBytes;
-      int blockOffset = (writeSize == 0) ? startingBlockOffset : 0;
-      if (indirectBlock[blockId - 1] == 0) {
-        indirectBlock[blockId - 1] = get_next_block();
-      }
-      writtenBytes += write_to_block(indirectBlock[blockId - 1], data, writeSize, blockOffset);
-    }
-    ++blockId;
+    node->size = size + offset;
   }
-  if (node->size < offset + writtenBytes) {
-    node->size = offset + writtenBytes;
+  int numBlocks = node->size / BLOCK_SIZE + 1;
+  int* blockIds = malloc(sizeof(int) * numBlocks);
+  if (numBlocks) {
+    blockIds[0] = node->direct;
   }
+  if (node->indirect && numBlocks > 1) {
+    int* indirectBlock = (int*) read_block(node->indirect, BLOCK_SIZE);
+    memcpy(&blockIds[1], indirectBlock, numBlocks - 1);
+    free(indirectBlock);
+  }
+  size_t writtenBytes = write_to_blocks(blockIds, numBlocks, data, size, offset);
+  free(blockIds);
   return writtenBytes;
 }
 

@@ -32,8 +32,8 @@ nufs_getattr(const char *path, struct stat *st)
 {
     // TODO: Might want to make this just return the value gotten from get_stat
     // would require returning the right error codes
+    printf("getattr(%s)\n", path);
     int rv = get_stat(path, st);
-    printf("getattr(%s) = %d\n", path, rv);
     if (rv < 0) {
         return -ENOENT;
     }
