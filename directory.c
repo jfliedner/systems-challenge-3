@@ -123,6 +123,7 @@ remove_file(directory* dir, char* name) {
 long
 get_file_inode(directory* dir, char* name) {
     char* start = get_file_start(dir);
+    assert(name);
     if (!start) {
         return -ENOENT;
     }
@@ -167,36 +168,36 @@ get_num_files(directory* dir) {
 
 long
 get_file_names(directory* dir, char*** namesPointer) {
-    long numFiles = get_num_files(dir);
-    if (!numFiles) {
-        return numFiles;
-    }
-    *namesPointer = malloc(sizeof(char*) * numFiles);
-    char** names = *namesPointer;
-    int inName = 1;
-    long nameIndex = 0;
-    long currentChar = 0;
-    long currentLength = 0;
-    char* fileNameStart = get_file_start(dir);
-    char* currentStart = fileNameStart;
-    while (fileNameStart[currentChar] != 0) {
-        if (fileNameStart[currentChar] == '/') {
-            names[nameIndex] = malloc(sizeof(char) * (currentLength + 1));
-            strncpy(names[nameIndex], currentStart, currentLength);
-            ++nameIndex;
-            inName = 0;
-            currentLength = 0;
-        }
-        if (!inName && !isdigit(fileNameStart[currentChar]) && fileNameStart[currentChar] != '-') {
-            inName = 1;
-            currentStart = &fileNameStart[currentChar];
-        }
-        if (inName) {
-            ++currentLength;
-        }
-        ++currentChar;
-    }
+  long numFiles = get_num_files(dir);
+  if (!numFiles) {
     return numFiles;
+  }
+  *namesPointer = malloc(sizeof(char*) * numFiles);
+  char** names = *namesPointer;
+  int inName = 1;
+  long nameIndex = 0;
+  long currentLength = 0;
+  char* fileNameStart = get_file_start(dir);
+  int currentStart = 0;
+  for (int i = 0; i < strlen(fileNameStart); ++i) {
+    char currentChar = fileNameStart[i];
+    if (currentChar == '/') {
+      names[nameIndex] = malloc(sizeof(char) * (currentLength + 1));
+      strncpy(names[nameIndex], &fileNameStart[currentStart], currentLength);
+      names[nameIndex][currentLength] = 0;
+      ++nameIndex;
+      inName = 0;
+      currentLength = 0;
+    }
+    if (!inName && !isdigit(currentChar) && currentChar != '-' && currentChar != '/') {
+      inName = 1;
+      currentStart = i;
+    }
+    if (inName) {
+      ++currentLength;
+    }
+  }
+  return numFiles;
 }
 
 void

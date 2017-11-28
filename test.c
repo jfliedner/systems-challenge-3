@@ -59,6 +59,19 @@ test_get_file_names() {
 }
 
 void
+test_get_multiple_file_names() {
+  directory* test = create_directory("", -1, -1);
+  add_file(test, "test", 0);
+  add_file(test, "test2", 1);
+  char** names;
+  long numFiles = get_file_names(test, &names);
+  assert(numFiles == 2);
+  assert(strcmp(names[0], "test") == 0);
+  assert(strcmp(names[1], "test2") == 0);
+  free_directory(test);
+}
+
+void
 test_serialize() {
   void* test = create_directory("", 0, 1);
   int* intData = test;
@@ -136,6 +149,7 @@ test_directory() {
   test_can_have_negative_inode_number();
   test_can_use_negative_inode_ids();
   test_get_names_with_negative();
+  test_get_multiple_file_names();
 }
 
 void
