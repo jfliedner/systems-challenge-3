@@ -131,8 +131,12 @@ get_file_inode(directory* dir, char* name) {
         return -ENOENT;
     }
     char* location = strstr(start, name);
+    int nameLen = strlen(name);
+    while (location && *(location + nameLen) != '/') {
+      // +1 is just to move it beyond current match so we actually progress
+      location = strstr(location + 1, name);
+    }
     if (location != 0) {
-        int index = location - start;
         char* slash = strstr(location, "/");
         char* inodeNum = slash + 1;
         int len = 0;

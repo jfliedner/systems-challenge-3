@@ -39,16 +39,34 @@ block_taken(int blockId) {
   return get_bit_state((byte*) &meta->block_status, blockId);
 }
 
-void
-take_block(int blockId) {
-  set_bit_high((byte*) &meta->block_status, blockId);
+void*
+get_block_address(int blockId) {
+  return (void*)((long)meta + ((long)blockId * BLOCK_SIZE));
+}
+
+size_t
+write_to_block(int blockId, void* data, size_t size, off_t offset) {
+  // We know that root's block is the first in the fs
+  byte* blockAddress = get_block_address(blockId);
+  size_t writeSize = (size >= BLOCK_SIZE) ? BLOCK_SIZE : size;
+  memcpy(&blockAddress[offset], data, writeSize);
+  return writeSize;
 }
 
 void
-release_block(int blockId) {
-  if (meta->root.nlink > 0 && meta->root.direct < blockId) {
-    set_bit_low((byte*) &meta->block_status, blockId);
+zero_block(int blockId) {
+  void* zeros = malloc(BLOCK_SIZE);
+  memset(zeros, 0, BLOCK_SIZE);
+  write_to_block(blockId, zeros, BLOCK_SIZE, 0);
+  free(zeros);
+}
+
+void
+take_block(int blockId) {
+  if (blockId >= meta->starting_block_index) {
+    zero_block(blockId);
   }
+  set_bit_high((byte*) &meta->block_status, blockId);
 }
 
 int
@@ -62,18 +80,11 @@ get_next_block() {
   return -ENOSPC;
 }
 
-void*
-get_block_address(int blockId) {
-  return (void*)((long)meta + ((long)blockId * BLOCK_SIZE));
-}
-
-size_t
-write_to_block(int blockId, void* data, size_t size, off_t offset) {
-  // We know that root's block is the first in the fs
-  byte* blockAddress = get_block_address(blockId);
-  size_t writeSize = (size >= BLOCK_SIZE) ? BLOCK_SIZE : size;
-  memcpy(&blockAddress[offset], data, writeSize);
-  return writeSize;
+void
+release_block(int blockId) {
+  if (meta->root.nlink > 0 && meta->root.direct < blockId) {
+    set_bit_low((byte*) &meta->block_status, blockId);
+  }
 }
 
 const char*
@@ -109,6 +120,20 @@ read_inode(inode* node) {
     free(indirectNodes);
   }
   return data;
+}
+
+int
+read_path(const char* path, char* buf, size_t size, off_t offset) {
+  inode* node = get_inode(path);
+  read_data* inodeData = read_inode(node);
+  int readSize = (inodeData->size < size) ? inodeData->size : size;
+  memcpy(buf, &inodeData->data[offset], readSize);
+  if (readSize < size) {
+    buf[readSize] = 0;
+    ++readSize;
+  }
+  free_read_data(inodeData);
+  return readSize;
 }
 
 int
@@ -216,7 +241,7 @@ free_blocks(inode* node, int currentCount, int desiredCount) {
 
 int
 get_blocks(inode* node, int currentCount, int desiredCount) {
-  if (desiredCount >= 1) {
+  if (desiredCount >= 1 && !node->direct) {
     node->direct = get_next_block();
   }
   if (desiredCount > 1 && !node->indirect) {
@@ -224,25 +249,26 @@ get_blocks(inode* node, int currentCount, int desiredCount) {
   }
   if (desiredCount > 1) {
     int* indirectBlock = (int*) read_block(node->indirect, BLOCK_SIZE);
-    for (int i = currentCount - 1; i < desiredCount - 1; ++i) {
-      if (indirectBlock[i] <= 0) {
-        indirectBlock[i] = get_next_block();
-        if (indirectBlock[i] < 0) {
-          free(indirectBlock);
-          return indirectBlock[i];
-        }
+    for (int i = currentCount; i < desiredCount - 1; ++i) {
+      indirectBlock[i] = get_next_block();
+      if (indirectBlock[i] < 0) {
+        int rv = indirectBlock[i];
+        free(indirectBlock);
+        return rv;
       }
     }
     write_to_block(node->indirect, indirectBlock, BLOCK_SIZE, 0);
-    free(indirectBlock);
+    //free(indirectBlock);
   }
   return 0;
 }
 
 int
 change_inode_size(inode* node, off_t size) {
-  int currentBlockCount = node->size / BLOCK_SIZE + 1;
-  int desiredBlockCount = size / BLOCK_SIZE + 1;
+  int currentBlockCount = node->size / BLOCK_SIZE;
+  currentBlockCount = (node->size % BLOCK_SIZE == 0) ? currentBlockCount : currentBlockCount + 1;
+  int desiredBlockCount = size / BLOCK_SIZE;
+  desiredBlockCount = (size % BLOCK_SIZE == 0) ? desiredBlockCount : desiredBlockCount + 1;
   int rv = 0;
   if (currentBlockCount < desiredBlockCount) {
     rv = get_blocks(node, currentBlockCount, desiredBlockCount);
@@ -291,16 +317,11 @@ write_to_blocks(int* blockIds, int numBlocks, void* data, size_t size, off_t off
 int
 write_to_inode(inode* node, void* data, size_t size, off_t offset) {
   size_t oldSize = node->size;
-  if (node->direct == 0) {
-    node->direct = get_next_block();
-  }
-  assert(node->direct >= meta->root.direct);
   if (size + offset > node->size) {
     int rv = change_inode_size(node, size + offset);
     if (rv < 0) {
       return rv;
     }
-    node->size = size + offset;
   }
   int numBlocks = node->size / BLOCK_SIZE;
   if (node->size % BLOCK_SIZE != 0) {
@@ -311,8 +332,9 @@ write_to_inode(inode* node, void* data, size_t size, off_t offset) {
     blockIds[0] = node->direct;
   }
   if (node->indirect && numBlocks > 1) {
-    int* indirectBlock = (int*) read_block(node->indirect, BLOCK_SIZE);
-    memcpy(&blockIds[1], indirectBlock, numBlocks - 1);
+    int size = sizeof(int) * (numBlocks - 1);
+    int* indirectBlock = (int*) read_block(node->indirect, size);
+    memcpy(&blockIds[1], indirectBlock, size);
     free(indirectBlock);
   }
   size_t writtenBytes = write_to_blocks(blockIds, numBlocks, data, size, offset);
@@ -548,13 +570,14 @@ inode_unlink(const char* path) {
   // We only want to remove the inode if there are no links left to it
   // we ALWAYS want to remove the reference in this directory though
   directory* dir = get_dir_from_inode(parent);
+  int inodeId = get_file_inode(dir, basename);
   remove_file(dir, basename);
   void* reserializedDir = serialize(dir);
   write_to_inode(parent, reserializedDir, get_size_directory(dir), 0);
   free(reserializedDir);
   if (child->nlink <= 0) {
     free_all_inode_blocks(child);
-    long inodeId = get_file_inode(dir, basename);
+    //printf("Releasing inode %d\n", inodeId);
     release_inode(inodeId);
   }
   free_directory(dir);
@@ -608,9 +631,9 @@ get_new_inode(const char* path, mode_t mode, dev_t dev) {
   free_directory(dir);
   free(serializedParent);
 
-  //printf("Got new inode id %d\n", newInodeId);
   inode* newFileNode = &meta->inodes[newInodeId];
   set_inode_defaults(newFileNode, mode);
   newFileNode->rdev = dev;
+  //printf("Giving inode %d\n", newInodeId);
   return newInodeId;
 }

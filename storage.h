@@ -49,6 +49,7 @@ int inode_unlink(const char* path);
 int inode_chmod(const char* path, mode_t mode);
 int inode_truncate(const char* path, off_t size);
 
+int read_path(const char* path, char* buf, size_t size, off_t offset);
 int write_to_inode(inode* node, void* buf, size_t size, off_t offset);
 
 void free_read_data(read_data* data);

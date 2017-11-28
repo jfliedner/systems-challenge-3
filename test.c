@@ -145,6 +145,15 @@ test_has_file() {
 }
 
 void
+test_distinguish_swap_files() {
+  directory* dir = create_directory("", -1, -1);
+  add_file(dir, ".testing.swp", 0);
+  add_file(dir, "testing", 1);
+  assert(get_file_inode(dir, "testing") == 1);
+  free_directory(dir);
+}
+
+void
 test_directory() {
   test_add_file();
   test_get_inode_num();
@@ -159,6 +168,7 @@ test_directory() {
   test_get_names_with_negative();
   test_get_multiple_file_names();
   test_has_file();
+  test_distinguish_swap_files();
 }
 
 void
