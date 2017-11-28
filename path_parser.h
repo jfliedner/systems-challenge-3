@@ -14,6 +14,7 @@ typedef struct string_array {
 */
 
 string_array* parse_path(char* string);
+char* get_last(string_array* array);
 void free_string_array(string_array* array);
 
 #endif

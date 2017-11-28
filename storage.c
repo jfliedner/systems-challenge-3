@@ -425,7 +425,31 @@ release_inode(long inodeId) {
 int
 inode_link(const char* from, const char* to) {
   string_array* parsedFromPath = parse_path((char*) from);
-  inode* parent = &meta->root;
+  string_array* parsedToPath = parse_path((char*) to);
+  inode_pair* fromPair = get_inode_pair(from);
+  inode_pair* toPair = get_inode_pair(to);
+  if ((long) fromPair < 0) {
+    return (long) fromPair;
+  }
+  if ((long) toPair < 0) {
+    return (long) toPair;
+  }
+  char* fromBasename = get_last(parsedFromPath);
+  char* toBasename = get_last(parsedToPath);
+  directory* fromDir = get_dir_from_inode(fromPair->parent);
+  directory* toDir = get_dir_from_inode(toPair->parent);
+  long inodeId = get_file_inode(fromDir, fromBasename);
+  add_file(toDir, toBasename, inodeId);
+  ++meta->inodes[inodeId].nlink;
+  void* serializedToDir = serialize(toDir);
+  write_to_inode(toPair->parent, serializedToDir, get_size_directory(toDir), 0);
+
+  free_string_array(parsedFromPath);
+  free_string_array(parsedToPath);
+  free_directory(fromDir);
+  free_directory(toDir);
+  free(serializedToDir);
+  return 0;
 }
 
 int
@@ -436,19 +460,19 @@ inode_unlink(const char* path) {
   inode* child = pair->child;
   char* basename = parsedPath->data[parsedPath->length - 1];
   --child->nlink;
+  // We only want to remove the inode if there are no links left to it
+  // we ALWAYS want to remove the reference in this directory though
+  directory* dir = get_dir_from_inode(parent);
+  remove_file(dir, basename);
+  void* reserializedDir = serialize(dir);
+  write_to_inode(parent, reserializedDir, get_size_directory(dir), 0);
+  free(reserializedDir);
   if (child->nlink <= 0) {
-    directory* dir = get_dir_from_inode(parent);
-    // Do actual unlinking before we remove the name from the dir
     free_all_inode_blocks(child);
     long inodeId = get_file_inode(dir, basename);
     release_inode(inodeId);
-    remove_file(dir, basename);
-    void* reserializedDir = serialize(dir);
-    write_to_inode(parent, reserializedDir, get_size_directory(dir), 0);
-
-    free_directory(dir);
-    free(reserializedDir);
   }
+  free_directory(dir);
   free_string_array(parsedPath);
   return 0;
 }

@@ -2,6 +2,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <assert.h>
 
 int
 occurences(char* str, char c) {
@@ -55,6 +56,12 @@ parse_path(char* path)
     add_string(array, temp, tempIndex);
   }
   return array;
+}
+
+char*
+get_last(string_array* arr) {
+  assert(arr->length);
+  return arr->data[arr->length - 1];
 }
 
 void
