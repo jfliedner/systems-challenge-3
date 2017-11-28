@@ -109,7 +109,7 @@ int
 nufs_unlink(const char *path)
 {
     printf("unlink(%s)\n", path);
-    return -1;
+    return inode_unlink(path);
 }
 
 int

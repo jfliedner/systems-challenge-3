@@ -6,10 +6,10 @@ HDRS := $(wildcard *.h)
 CFLAGS := -g `pkg-config fuse --cflags`
 LDLIBS := `pkg-config fuse --libs` -lbsd
 
-nufs: directory.c nufs.c storage.c 
+nufs: directory.c nufs.c storage.c path_parser.c 
 	gcc $(CFLAGS) -o nufs $^ $(LDLIBS)
 
-test-code: test.c directory.c storage.c
+test-code: test.c directory.c storage.c path_parser.c
 	gcc $(CFLAGS) -o test $^ $(LDLIBS)
 
 clean: unmount

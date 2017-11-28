@@ -13,6 +13,7 @@
 #include "bitmap.h"
 #include "directory.h"
 #include "storage.h"
+#include "path_parser.h"
 
 #define NUM_INODES
 #define BLOCK_BITFIELD_LENGTH (DISK_SIZE / BLOCK_SIZE) / 8
@@ -77,6 +78,73 @@ read_block(int blockId, size_t size) {
   return outData;
 }
 
+read_data*
+read_inode(inode* node) {
+  read_data* data = malloc(sizeof(read_data));
+  data->type = node->mode;
+  data->size = node->size;
+  data->data = malloc(node->size);
+  byte* readData = (byte*) read_block(node->direct, node->size);
+  int readSize = (node->size < BLOCK_SIZE) ? node->size : BLOCK_SIZE;
+  memcpy(data->data, readData, readSize);
+  free(readData);
+  if (node->indirect != 0) {
+    int* indirectNodes = (int*) read_block(node->indirect, BLOCK_SIZE);
+    int indirectIndex = 0;
+    while (indirectNodes[indirectIndex] != 0 && readSize < data->size) {
+      int nextReadSize = (data->size > readSize + BLOCK_SIZE) ? BLOCK_SIZE : data->size - readSize;
+      readData = (byte*) read_block(indirectNodes[indirectIndex], node->size);
+      memcpy(&data->data[readSize], readData, nextReadSize);
+      free(readData);
+      ++indirectIndex;
+      readSize += nextReadSize;
+    }
+    free(indirectNodes);
+  }
+  return data;
+}
+
+int
+is_dir_inode(inode* node) {
+  return node->mode & S_IFDIR;
+}
+
+directory*
+get_dir_from_inode(inode* node) {
+  read_data* nodeData = read_inode(node);
+  directory* dir = deserialize(nodeData->data, nodeData->size);
+  free_read_data(nodeData);
+  return dir;
+}
+
+inode*
+get_inode_from_dir_inode(inode* node, char* name) {
+  directory* dir = get_dir_from_inode(node);
+  long inodeIndex = get_file_inode(dir, name);
+  free_directory(dir);
+  return &meta->inodes[inodeIndex];
+}
+
+void
+free_all_inode_blocks(inode* node) {
+  if (node->direct != 0) {
+    release_block(node->direct);
+  }
+  if (node->indirect != 0) {
+    int* indirectBlockIds = (int*) read_block(node->indirect, BLOCK_SIZE);
+    for (int i = 0; i < BLOCK_SIZE / sizeof(int); ++i) {
+      if (indirectBlockIds[i] >= meta->starting_block_index && indirectBlockIds[i] <= BLOCK_COUNT) {
+        release_block(indirectBlockIds[i]);
+      }
+      else {
+        // We got junk (probably 0) abort
+        break;
+      }
+    }
+    release_block(node->indirect);
+  }
+}
+
 int
 write_to_inode(inode* node, void* data, size_t size, off_t offset) {
   size_t oldSize = node->size;
@@ -84,17 +152,35 @@ write_to_inode(inode* node, void* data, size_t size, off_t offset) {
     node->direct = get_next_block();
   }
   assert(node->direct >= meta->root.direct);
-  int blockId = offset / BLOCK_SIZE;
-  int blockOffset = offset % BLOCK_SIZE;
   size_t writtenBytes = 0;
-  if (blockId == 0) {
-    writtenBytes += write_to_block(node->direct, data, size, blockOffset);
-  }
-  else {
-    assert(0);
-  }
-  if (writtenBytes < size && node->indirect == 0) {
+  if (size + offset > BLOCK_SIZE && node->indirect == 0) {
+    // Make sure the block is initialized to zero because that's
+    // going to matter
     node->indirect = get_next_block();
+    void* data = malloc(BLOCK_SIZE);
+    memset(data, 0, BLOCK_SIZE);
+    write_to_block(node->indirect, data, BLOCK_SIZE, 0);
+    free(data);
+  }
+  int* indirectBlock = (int*) read_block(node->indirect, BLOCK_SIZE);
+  int blockId = offset / BLOCK_SIZE;
+  int startingBlockOffset = offset % BLOCK_SIZE;
+  while (writtenBytes < size) {
+    int blockLow = blockId * BLOCK_SIZE;
+    int blockHigh = blockLow + BLOCK_SIZE;
+    if (blockId == 0) {
+      int writeSize = (size + offset > blockHigh) ? blockHigh - startingBlockOffset : size;
+      writtenBytes += write_to_block(node->direct, data, writeSize, startingBlockOffset);
+    }
+    else {
+      int writeSize = (size - writtenBytes >= BLOCK_SIZE) ? BLOCK_SIZE : size - writtenBytes;
+      int blockOffset = (writeSize == 0) ? startingBlockOffset : 0;
+      if (indirectBlock[blockId - 1] == 0) {
+        indirectBlock[blockId - 1] = get_next_block();
+      }
+      writtenBytes += write_to_block(indirectBlock[blockId - 1], data, writeSize, blockOffset);
+    }
+    ++blockId;
   }
   if (node->size < offset + writtenBytes) {
     node->size = offset + writtenBytes;
@@ -146,15 +232,6 @@ void storage_init(const char* path) {
   ftruncate(fd, DISK_SIZE);
   meta = mmap(0, DISK_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_SHARED, fd, 0);
   configure_root();
-}
-
-read_data*
-read_inode(inode* node) {
-  read_data* data = malloc(sizeof(read_data));
-  data->type = node->mode;
-  data->size = node->size;
-  data->data = (byte*) read_block(node->direct, node->size);
-  return data;
 }
 
 inode*
@@ -309,11 +386,50 @@ is_directory(const char* path) {
   if ((long) node < 0) {
     return -1;
   }
-  return node->mode & S_IFDIR;
+  return is_dir_inode(node);
+}
+
+void
+release_inode(long inodeId) {
+  set_bit_low(meta->inode_status, inodeId);
+}
+
+int
+inode_unlink(const char* path) {
+  string_array* parsedPath = parse_path((char*) path);
+  inode* parent = &meta->root;
+
+  for (int i = 0; i < parsedPath->length - 2; ++i) {
+    if (is_dir_inode(parent)) {
+      parent = get_inode_from_dir_inode(parent, parsedPath->data[i]);
+    }
+    else {
+      return -1;
+    }
+  }
+  char* basename = parsedPath->data[parsedPath->length - 1];
+  inode* child = get_inode_from_dir_inode(parent, basename);
+  --child->nlink;
+  if (child->nlink <= 0) {
+    directory* dir = get_dir_from_inode(parent);
+    // Do actual unlinking before we remove the name from the dir
+    free_all_inode_blocks(child);
+    long inodeId = get_file_inode(dir, basename);
+    release_inode(inodeId);
+    remove_file(dir, basename);
+    void* reserializedDir = serialize(dir);
+    write_to_inode(parent, reserializedDir, get_size_directory(dir), 0);
+
+    free_directory(dir);
+    free(reserializedDir);
+  }
+  free_string_array(parsedPath);
+  return 0;
 }
 
 long
 get_new_inode(const char* path, mode_t mode, dev_t dev) {
+  // TODO: replace this with the new path parsed code
   if (!path || *path != '/') {
     return -1;
   }
@@ -328,10 +444,7 @@ get_new_inode(const char* path, mode_t mode, dev_t dev) {
   char* pathName;
   if (lastSlash == path) {
     pathLength = strlen(path);
-    // If this is true then parent is rootDirectory
     parent = &meta->root;
-    // Again, mainly convenient for debugging
-    //pathName = "/";
   }
   else {
     pathLength = lastSlash - path;
@@ -340,23 +453,10 @@ get_new_inode(const char* path, mode_t mode, dev_t dev) {
       // Return path is bad
       return -ENOENT;
     }
-    // Need this for debugging mainly
-    /*
-    char* pathName = malloc(sizeof(char) * (pathLength + 1));
-    strncpy(pathName, path, pathLength);
-    pathName[pathLength] = 0;
-    */
   }
   // We actually wanna handle if this is -1
   char* fileName = lastSlash + 1;
 
-  // Have the parent inode and the new file name
-  /*if ((long) parent < 0) {
-    printf ("Failed to find /%s/%s\n", pathName, fileName);
-    free(pathName);
-    return (long) parent;
-  }
-  free(pathName);*/
   if ((long) parent < 0) {
     printf("Error on parent inode get\n");
     // TODO: This should probably return a directory not found error

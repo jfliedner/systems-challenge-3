@@ -44,6 +44,7 @@ inode* get_or_create_inode(const char* path);
 long get_dirent(const char* path, struct dirent* dirInfo);
 int is_directory(const char* path);
 long get_new_inode(const char* path, mode_t mode, dev_t dev);
+int inode_unlink(const char* path);
 
 int write_to_inode(inode* node, void* buf, size_t size, off_t offset);
 

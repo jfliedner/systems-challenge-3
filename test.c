@@ -3,6 +3,7 @@
 
 #include "directory.h"
 #include "storage.h"
+#include "path_parser.h"
 
 void
 test_add_file() {
@@ -93,6 +94,45 @@ test_directory() {
   test_get_size();
   test_dot_names();
 }
+
+void
+test_root_parse() {
+  string_array* testArray = parse_path("/");
+  assert(testArray->length == 0);
+  free_string_array(testArray);
+}
+
+void
+test_single_parse() {
+  string_array* testArray = parse_path("/test");
+  assert(testArray->length == 1);
+  assert(strcmp(testArray->data[0], "test") == 0);
+  free_string_array(testArray);
+}
+
+void
+test_multi_parse() {
+  string_array* testArray = parse_path("/dir/test");
+  assert(testArray->length == 2);
+  assert(strcmp(testArray->data[0], "dir") == 0);
+  assert(strcmp(testArray->data[1], "test") == 0);
+  free_string_array(testArray);
+}
+
+void
+test_can_end_with_slash() {
+  string_array* testArray = parse_path("/dir/");
+  assert(testArray->length == 1);
+  assert(strcmp(testArray->data[0], "dir"));
+  free_string_array(testArray);
+}
+
+void
+test_parser() {
+  test_root_parse();
+  test_single_parse();
+  test_multi_parse();
+}
 /*
 void
 test_root() {
@@ -104,11 +144,12 @@ test_root() {
 */
 void
 test_storage() {
-  storage_init("test_fs");
+  //storage_init("test_fs");
   //test_root();
 }
 
 int main() {
   test_directory();
+  test_parser();
   test_storage();
 }
