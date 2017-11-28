@@ -302,7 +302,10 @@ write_to_inode(inode* node, void* data, size_t size, off_t offset) {
     }
     node->size = size + offset;
   }
-  int numBlocks = node->size / BLOCK_SIZE + 1;
+  int numBlocks = node->size / BLOCK_SIZE;
+  if (node->size % BLOCK_SIZE != 0) {
+    ++numBlocks;
+  }
   int* blockIds = malloc(sizeof(int) * numBlocks);
   if (numBlocks) {
     blockIds[0] = node->direct;
@@ -342,19 +345,21 @@ void configure_root() {
   }
 
   inode* root = &meta->root;
-  set_inode_defaults(root, S_IFDIR | S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-  //root->uid = 0000;
-  //root->gid = 0000;
-  root->direct = meta->starting_block_index;
-  take_block(meta->starting_block_index);
-  root->indirect = 0;
-  directory* rootDirectory = create_directory("", -1, -1);
-  void* serialData =  serialize(rootDirectory);
-  write_to_inode(root, serialData, get_size_directory(rootDirectory), 0);
+  if (root->size < 9) {
+    set_inode_defaults(root, S_IFDIR | S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    //root->uid = 0000;
+    //root->gid = 0000;
+    root->direct = meta->starting_block_index;
+    take_block(meta->starting_block_index);
+    root->indirect = 0;
+    directory* rootDirectory = create_directory("", -1, -1);
+    void* serialData =  serialize(rootDirectory);
+    write_to_inode(root, serialData, get_size_directory(rootDirectory), 0);
+  }
 }
 
 void storage_init(const char* path) {
-  int fd = open(path, O_CREAT | O_TRUNC | O_RDWR);
+  int fd = open(path, O_CREAT | O_RDWR, 0666);
   // This guarantees things are filled with zero if increasing.
   // Therefore we can assume that if meta->root.direct == 0,
   // we need to configure root
