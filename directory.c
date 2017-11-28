@@ -15,8 +15,11 @@ smart_cat(char* str1, char* str2) {
         str1 = malloc(sizeof(char) * (strlen(str2) + 1));
         return str1;
     }
-    str1 = realloc(str1, strlen(str1) + strlen(str2));
-    return strcat(str1, str2);
+    char* outString = malloc(strlen(str1) + strlen(str2) + 1);
+    memcpy(outString, str1, strlen(str1));
+    memcpy(outString + strlen(str1), str2, strlen(str2));
+    outString[strlen(str1) + strlen(str2)] = 0;
+    return outString;
 }
 
 char* num_to_string(long number) {
@@ -198,6 +201,13 @@ get_file_names(directory* dir, char*** namesPointer) {
     }
   }
   return numFiles;
+}
+
+int
+has_file(directory* dir, char* name) {
+  char slash[2] = "/";
+  char* searchString = smart_cat(name, slash);
+  return strstr(dir->paths, searchString) != NULL;
 }
 
 void

@@ -32,8 +32,8 @@ nufs_getattr(const char *path, struct stat *st)
 {
     // TODO: Might want to make this just return the value gotten from get_stat
     // would require returning the right error codes
-    printf("getattr(%s)\n", path);
     int rv = get_stat(path, st);
+    printf("getattr(%s) = %d\n", path, rv);
     if (rv < 0) {
         return -ENOENT;
     }
@@ -136,14 +136,14 @@ int
 nufs_chmod(const char *path, mode_t mode)
 {
     printf("chmod(%s, %04o)\n", path, mode);
-    return -1;
+    return inode_chmod(path, mode);
 }
 
 int
 nufs_truncate(const char *path, off_t size)
 {
     printf("truncate(%s, %ld bytes)\n", path, size);
-    return -1;
+    return inode_truncate(path, size);
 }
 
 // this is called on open, but doesn't need to do much

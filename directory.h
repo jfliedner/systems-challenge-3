@@ -19,6 +19,7 @@ long get_num_files(directory* dir);
 long get_file_names(directory* dir, char*** namesPointer);
 void free_directory(directory* dir);
 int is_dir_empty(directory* dir);
+int has_file(directory* dir, char* name);
 
 void* serialize(directory* dir);
 directory* deserialize(void* addr, size_t size);

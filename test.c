@@ -137,6 +137,14 @@ test_get_names_with_negative() {
 }
 
 void
+test_has_file() {
+  directory* dir = create_directory("", -1, -1);
+  add_file(dir, "test", 0);
+  assert(has_file(dir, "test"));
+  free_directory(dir);
+}
+
+void
 test_directory() {
   test_add_file();
   test_get_inode_num();
@@ -150,6 +158,7 @@ test_directory() {
   test_can_use_negative_inode_ids();
   test_get_names_with_negative();
   test_get_multiple_file_names();
+  test_has_file();
 }
 
 void

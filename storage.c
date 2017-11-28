@@ -46,7 +46,9 @@ take_block(int blockId) {
 
 void
 release_block(int blockId) {
-  set_bit_low((byte*) &meta->block_status, blockId);
+  if (meta->root.nlink > 0 && meta->root.direct < blockId) {
+    set_bit_low((byte*) &meta->block_status, blockId);
+  }
 }
 
 int
@@ -57,7 +59,7 @@ get_next_block() {
       return i;
     }
   }
-  return -1;
+  return -ENOSPC;
 }
 
 void*
@@ -125,9 +127,17 @@ get_dir_from_inode(inode* node) {
 inode*
 get_inode_from_dir_inode(inode* node, char* name) {
   directory* dir = get_dir_from_inode(node);
-  long inodeIndex = get_file_inode(dir, name);
+  long inodeIndex = -1;
+  if (has_file(dir, name)) {
+    inodeIndex = get_file_inode(dir, name);
+  }
   free_directory(dir);
-  return &meta->inodes[inodeIndex];
+  if (inodeIndex >= 0) {
+    return &meta->inodes[inodeIndex];
+  }
+  else {
+    return (inode*) -ENOTDIR;
+  }
 }
 
 inode_pair*
@@ -171,6 +181,85 @@ free_all_inode_blocks(inode* node) {
     }
     release_block(node->indirect);
   }
+}
+
+void
+free_blocks_from_indirect(long indirectId, int currentCount, int desiredIndirectBlocks) {
+  int* indirectBlock = (int*) read_block(indirectId, BLOCK_SIZE);
+  for (int i = currentCount - 1; i >= desiredIndirectBlocks; --i) {
+    release_block(indirectBlock[i]);
+    indirectBlock[i] = 0;
+  }
+  // We don't know if the block is going to be released, so it's best
+  // to just save the state
+  write_to_block(indirectId, indirectBlock, BLOCK_SIZE, 0);
+  free(indirectBlock);
+}
+
+int
+free_blocks(inode* node, int currentCount, int desiredCount) {
+  if (node->indirect) {
+    int currentIndirectBlocks = currentCount - 1;
+    int desiredIndirectBlocks = (desiredCount <= 0) ? 0 : desiredCount - 1;
+    free_blocks_from_indirect(node->indirect, currentIndirectBlocks, desiredIndirectBlocks);
+    if (desiredIndirectBlocks <= 0) {
+      release_block(node->indirect);
+      node->indirect = 0;
+    }
+  }
+  if (desiredCount == 0) {
+    release_block(node->direct);
+    node->direct = 0;
+  }
+  return 0;
+}
+
+int
+get_blocks(inode* node, int currentCount, int desiredCount) {
+  if (desiredCount >= 1) {
+    node->direct = get_next_block();
+  }
+  if (desiredCount > 1 && !node->indirect) {
+    node->indirect = get_next_block();
+  }
+  if (desiredCount > 1) {
+    int* indirectBlock = (int*) read_block(node->indirect, BLOCK_SIZE);
+    for (int i = currentCount - 1; i < desiredCount - 1; ++i) {
+      if (indirectBlock[i] <= 0) {
+        indirectBlock[i] = get_next_block();
+        if (indirectBlock[i] < 0) {
+          free(indirectBlock);
+          return indirectBlock[i];
+        }
+      }
+    }
+    write_to_block(node->indirect, indirectBlock, BLOCK_SIZE, 0);
+    free(indirectBlock);
+  }
+  return 0;
+}
+
+int
+inode_truncate(const char* path, off_t size) {
+  inode* node = get_inode(path);
+  if ((long) node < 0) {
+    return (long) node;
+  }
+  int currentBlockCount = node->size / BLOCK_SIZE + 1;
+  int desiredBlockCount = size / BLOCK_SIZE + 1;
+  int rv = 0;
+  if (currentBlockCount < desiredBlockCount) {
+    rv = get_blocks(node, currentBlockCount, desiredBlockCount);
+  }
+  else if (desiredBlockCount < currentBlockCount) {
+    rv = free_blocks(node, currentBlockCount, desiredBlockCount);
+    if (size == 0) {
+      release_block(node->direct);
+      node->direct = 0;
+    }
+  }
+  node->size = size;
+  return rv;
 }
 
 int
@@ -265,41 +354,20 @@ void storage_init(const char* path) {
 inode*
 get_inode(const char* path) {
   inode* currentNode = &meta->root;
-  //printf("Checking path %s\n", path);
-  if (strcmp(path, "/") == 0) {
-    return currentNode;
-  }
-  char* start = (char*)path + 1;
-  char* slash = strstr(start, "/");
-  int length;
-  do {
-    if (slash) {
-      length = slash - start;
+  string_array* parsedPath = parse_path((char*) path);
+  int lastIndex = parsedPath->length - 1;
+  for (int i = 0; i < parsedPath->length; ++i) {
+    if (is_dir_inode(currentNode)) {
+      currentNode = get_inode_from_dir_inode(currentNode, parsedPath->data[i]);
+      if ((long) currentNode < 0) {
+        return currentNode;
+      }
     }
     else {
-      length = strlen(start);
+      // TODO: this needs to be a different error (i think)
+      return (inode*) -ENOENT;
     }
-    char* name = malloc(sizeof(char) * (length + 1));
-    strncpy(name, start, length);
-    name[length] = 0;
-    read_data* data = read_inode(currentNode);
-    directory* dir = deserialize(data->data, data->size);
-    free_read_data(data);
-    long inodeId = get_file_inode(dir, name);
-    if (inodeId < 0) {
-      return (inode*) -ENOENT;//printf("Failed to find name %s\n", name);
-    }
-    free(name);
-    free_directory(dir);
-    if (inodeId < 0) {
-      return (inode*) -1;
-    }
-    currentNode = &meta->inodes[inodeId];
-    if (start[length] == '/') {
-      start = slash + 1;
-    }
-  } while (start[length] == '/');
-  //printf("Returning node with pointer %p (root is %p)\n", currentNode, &meta->root);
+  }
   return currentNode;
 }
 
@@ -477,9 +545,18 @@ inode_unlink(const char* path) {
   return 0;
 }
 
+int
+inode_chmod(const char* path, mode_t mode) {
+  inode* node = get_inode(path);
+  if ((long) node < 0) {
+    return (long) node;
+  }
+  node->mode = mode;
+  return 0;
+}
+
 long
 get_new_inode(const char* path, mode_t mode, dev_t dev) {
-  // TODO: replace this with the new path parsed code
   string_array* array = parse_path((char*) path);
   inode* parent = &meta->root;
   for (int i = 0; i < array->length - 1; ++i) {
