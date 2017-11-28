@@ -125,7 +125,11 @@ int
 nufs_rename(const char *from, const char *to)
 {
     printf("rename(%s => %s)\n", from, to);
-    return -1;
+    int rv = inode_link(from, to);
+    if (rv != 0) {
+      return rv;
+    }
+    return inode_unlink(from);
 }
 
 int

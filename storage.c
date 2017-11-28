@@ -27,6 +27,11 @@ typedef struct meta_block {
   byte* block_start;
 } meta_block;
 
+typedef struct inode_pair {
+  inode* parent;
+  inode* child;
+} inode_pair;
+
 meta_block* meta;
 
 int
@@ -125,6 +130,29 @@ get_inode_from_dir_inode(inode* node, char* name) {
   return &meta->inodes[inodeIndex];
 }
 
+inode_pair*
+get_inode_pair(const char* path) {
+  inode_pair* pair = malloc(sizeof(inode_pair));
+  inode* parent = &meta->root;
+  string_array* parsedPath = parse_path((char*) path);
+
+  for (int i = 0; i < parsedPath->length - 2; ++i) {
+    if (is_dir_inode(parent)) {
+      parent = get_inode_from_dir_inode(parent, parsedPath->data[i]);
+    }
+    else {
+      return (inode_pair*) -1;
+    }
+  }
+
+  char* basename = parsedPath->data[parsedPath->length - 1];
+  inode* child = get_inode_from_dir_inode(parent, basename);
+  pair->parent = parent;
+  pair->child = child;
+  free_string_array(parsedPath);
+  return pair;
+}
+
 void
 free_all_inode_blocks(inode* node) {
   if (node->direct != 0) {
@@ -219,7 +247,7 @@ void configure_root() {
   root->direct = meta->starting_block_index;
   take_block(meta->starting_block_index);
   root->indirect = 0;
-  directory* rootDirectory = create_directory("", root->direct, -1);
+  directory* rootDirectory = create_directory("", -1, -1);
   void* serialData =  serialize(rootDirectory);
   write_to_inode(root, serialData, get_size_directory(rootDirectory), 0);
 }
@@ -395,20 +423,18 @@ release_inode(long inodeId) {
 }
 
 int
+inode_link(const char* from, const char* to) {
+  string_array* parsedFromPath = parse_path((char*) from);
+  inode* parent = &meta->root;
+}
+
+int
 inode_unlink(const char* path) {
   string_array* parsedPath = parse_path((char*) path);
-  inode* parent = &meta->root;
-
-  for (int i = 0; i < parsedPath->length - 2; ++i) {
-    if (is_dir_inode(parent)) {
-      parent = get_inode_from_dir_inode(parent, parsedPath->data[i]);
-    }
-    else {
-      return -1;
-    }
-  }
+  inode_pair* pair = get_inode_pair(path);
+  inode* parent = pair->parent;
+  inode* child = pair->child;
   char* basename = parsedPath->data[parsedPath->length - 1];
-  inode* child = get_inode_from_dir_inode(parent, basename);
   --child->nlink;
   if (child->nlink <= 0) {
     directory* dir = get_dir_from_inode(parent);
@@ -430,32 +456,15 @@ inode_unlink(const char* path) {
 long
 get_new_inode(const char* path, mode_t mode, dev_t dev) {
   // TODO: replace this with the new path parsed code
-  if (!path || *path != '/') {
-    return -1;
-  }
-  char* slash = strstr(path, "/");
-  char* lastSlash;
-  do {
-    lastSlash = slash;
-    slash = strstr(slash + 1, "/");
-  } while(slash);
-  int pathLength;
-  inode* parent;
-  char* pathName;
-  if (lastSlash == path) {
-    pathLength = strlen(path);
-    parent = &meta->root;
-  }
-  else {
-    pathLength = lastSlash - path;
-    parent = get_inode(pathName);
+  string_array* array = parse_path((char*) path);
+  inode* parent = &meta->root;
+  for (int i = 0; i < array->length - 1; ++i) {
+    parent = get_inode_from_dir_inode(parent, array->data[i]);
     if ((long) parent < 0) {
-      // Return path is bad
-      return -ENOENT;
+      return (long) parent;
     }
   }
-  // We actually wanna handle if this is -1
-  char* fileName = lastSlash + 1;
+  char* basename = array->data[array->length - 1];
 
   if ((long) parent < 0) {
     printf("Error on parent inode get\n");
@@ -475,13 +484,13 @@ get_new_inode(const char* path, mode_t mode, dev_t dev) {
   }
   set_bit_high(meta->inode_status, newInodeId);
   // Add new file to the directory
-  add_file(dir, fileName, newInodeId);
+  add_file(dir, basename, newInodeId);
   void* serializedParent = serialize(dir);
   write_to_inode(parent, serializedParent, get_size_directory(dir), 0);
   free_directory(dir);
   free(serializedParent);
 
-  printf("Got new inode id %d\n", newInodeId);
+  //printf("Got new inode id %d\n", newInodeId);
   inode* newFileNode = &meta->inodes[newInodeId];
   set_inode_defaults(newFileNode, mode);
   newFileNode->rdev = dev;

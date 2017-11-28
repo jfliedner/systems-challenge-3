@@ -61,10 +61,10 @@ test_get_file_names() {
 void
 test_serialize() {
   void* test = create_directory("", 0, 1);
-  long* longData = test;
-  char* data = (char*) &longData[2];
-  assert(longData[0] == 0);
-  assert(longData[1] == 1);
+  int* intData = test;
+  char* data = (char*) &intData[2];
+  assert(intData[0] == 0);
+  assert(intData[1] == 1);
   assert(strcmp(data, "/0") == 0);
   free_directory(test);
 }
@@ -85,6 +85,45 @@ test_dot_names() {
 }
 
 void
+test_number_ending_names() {
+  directory* dir = create_directory("", 0, 1);
+  add_file(dir, "test2", 1);
+  char** names;
+  get_file_names(dir, &names);
+  // We know num files is 1
+  assert(strcmp(names[0], "test2") == 0);
+  free_directory(dir);
+}
+
+void
+test_can_have_negative_inode_number() {
+  directory* dir = create_directory("", 0, -1);
+  add_file(dir, "test2", 1);
+  char** names;
+  get_file_names(dir, &names);
+  // We know num files is 1
+  assert(strcmp(names[0], "test2") == 0);
+  free_directory(dir);
+}
+
+void
+test_can_use_negative_inode_ids() {
+  directory* dir = create_directory("", -1, -1);
+  assert(strcmp(dir->paths, "/-1") == 0);
+  free_directory(dir);
+}
+
+void
+test_get_names_with_negative() {
+  directory* dir = create_directory("", -1, -1);
+  add_file(dir, "test", 0);
+  char** names;
+  get_file_names(dir, &names);
+  assert(strcmp("test", names[0]) == 0);
+  free_directory(dir);
+}
+
+void
 test_directory() {
   test_add_file();
   test_get_inode_num();
@@ -93,6 +132,10 @@ test_directory() {
   test_get_file_names();
   test_get_size();
   test_dot_names();
+  test_number_ending_names();
+  test_can_have_negative_inode_number();
+  test_can_use_negative_inode_ids();
+  test_get_names_with_negative();
 }
 
 void

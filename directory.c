@@ -20,10 +20,24 @@ smart_cat(char* str1, char* str2) {
 }
 
 char* num_to_string(long number) {
+    int isNegative = number < 0;
+    if (isNegative) {
+      number = -number;
+    }
     int n = snprintf(NULL, 0, "%lu", number) + 1;
     char* numBuf = malloc(sizeof(char) * n);
     snprintf(numBuf, n, "%lu", number);
-    return numBuf;
+    if (isNegative) {
+      char* output = malloc(2 * sizeof(char));
+      output[0] = '-';
+      output[1] = 0;
+      output = smart_cat(output, numBuf);
+      free(numBuf);
+      return output;
+    }
+    else {
+      return numBuf;
+    }
 }
 
 directory*
@@ -39,7 +53,7 @@ create_directory(char* name, long inodeId, long pnum) {
 char*
 get_file_start(directory* dir) {
     char* start = strstr(dir->paths, "/");
-    while (start && (*start == '/' || isdigit(*start))) {
+    while (start && (*start == '/' || isdigit(*start) || *start == '-')) {
         ++start;
     }
     if (*start) {
@@ -173,7 +187,7 @@ get_file_names(directory* dir, char*** namesPointer) {
             inName = 0;
             currentLength = 0;
         }
-        if (!inName && !isdigit(fileNameStart[currentChar])) {
+        if (!inName && !isdigit(fileNameStart[currentChar]) && fileNameStart[currentChar] != '-') {
             inName = 1;
             currentStart = &fileNameStart[currentChar];
         }
@@ -198,8 +212,8 @@ serialize(directory* dir) {
     void* writeArray = malloc(size);
     memcpy(writeArray, &dir->pnum, sizeof(int));
     memcpy(writeArray + sizeof(int), &dir->inodeId, sizeof(int));
-    long twoLong = sizeof(int) + sizeof(int);
-    memcpy(writeArray + twoLong, dir->paths, size - twoLong);
+    long twoInt = sizeof(int) + sizeof(int);
+    memcpy(writeArray + twoInt, dir->paths, size - twoInt);
     return writeArray;
 }
 
