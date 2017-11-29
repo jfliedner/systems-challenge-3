@@ -9,6 +9,7 @@ typedef struct directory {
     char* paths;
 } directory;
 
+char* smart_cat(char* str1, char* str2);
 directory* create_directory(char* name, long inodeId, long pnum);
 int add_file(directory* dir, char* name, long inodeId);
 char* get_name(directory* dir);

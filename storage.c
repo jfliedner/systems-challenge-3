@@ -243,13 +243,14 @@ int
 get_blocks(inode* node, int currentCount, int desiredCount) {
   if (desiredCount >= 1 && !node->direct) {
     node->direct = get_next_block();
+    ++currentCount;
   }
   if (desiredCount > 1 && !node->indirect) {
     node->indirect = get_next_block();
   }
   if (desiredCount > 1) {
     int* indirectBlock = (int*) read_block(node->indirect, BLOCK_SIZE);
-    for (int i = currentCount; i < desiredCount - 1; ++i) {
+    for (int i = currentCount - 1; i < desiredCount - 1; ++i) {
       indirectBlock[i] = get_next_block();
       if (indirectBlock[i] < 0) {
         int rv = indirectBlock[i];
@@ -301,6 +302,7 @@ write_to_blocks(int* blockIds, int numBlocks, void* data, size_t size, off_t off
     return -1;
   }
   int blockOffset = offset % BLOCK_SIZE;
+  offset -= blockIndex * BLOCK_SIZE;
   int writeSize = (size < BLOCK_SIZE - offset) ? size : BLOCK_SIZE - offset;
   int writtenBytes = write_to_block(blockIds[blockIndex], data, writeSize, blockOffset);
   ++blockIndex;
@@ -560,12 +562,7 @@ inode_link(const char* from, const char* to) {
 }
 
 int
-inode_unlink(const char* path) {
-  string_array* parsedPath = parse_path((char*) path);
-  inode_pair* pair = get_inode_pair(path);
-  inode* parent = pair->parent;
-  inode* child = pair->child;
-  char* basename = parsedPath->data[parsedPath->length - 1];
+delete_link(inode* parent, inode* child, char* basename) {
   --child->nlink;
   // We only want to remove the inode if there are no links left to it
   // we ALWAYS want to remove the reference in this directory though
@@ -581,8 +578,43 @@ inode_unlink(const char* path) {
     release_inode(inodeId);
   }
   free_directory(dir);
-  free_string_array(parsedPath);
   return 0;
+}
+
+int
+remove_dir_inode(inode* node) {
+  char** fileNames;
+  directory* parentDir = get_dir_from_inode(node);
+  int numFiles = get_file_names(parentDir, &fileNames);
+  for (int i = 0; i < numFiles; ++i) {
+    int inodeId = get_file_inode(parentDir, fileNames[i]);
+    inode* child = &meta->inodes[inodeId];
+    if (is_dir_inode(child)) {
+      int rv = remove_dir_inode(child);
+    }
+    delete_link(node, child, fileNames[i]);
+  }
+  free_directory(parentDir);
+  //free_(node);
+  return 0;
+}
+
+int
+inode_unlink(const char* path) {
+  string_array* parsedPath = parse_path((char*) path);
+  inode_pair* pair = get_inode_pair(path);
+  inode* parent = pair->parent;
+  inode* child = pair->child;
+  int rv = 0;
+  if (is_dir_inode(child)) {
+    rv = remove_dir_inode(child);
+  }
+  else {
+    char* basename = get_last(parsedPath);
+    rv = delete_link(parent, child, basename);
+  }
+  free_string_array(parsedPath);
+  return rv;
 }
 
 int
@@ -656,4 +688,9 @@ create_dir_inode(const char* path, mode_t mode) {
   free_directory(dir);
   free_string_array(arr);
   return 0;
+}
+
+int
+remove_dir(const char* path) {
+  return inode_unlink(path);
 }

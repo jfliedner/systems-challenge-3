@@ -122,7 +122,7 @@ int
 nufs_rmdir(const char *path)
 {
     printf("rmdir(%s)\n", path);
-    return -1;
+    return remove_dir(path);
 }
 
 // implements: man 2 rename
