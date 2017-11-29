@@ -1,0 +1,22 @@
+David Frymoyer and Jillian Fliedner
+
+We emulated the ext file system. As such we have many of the issues of that
+file system which we covered in class. For example we have a bitmap of free
+blocks which we use to track free blocks, this gets slow on big disks. We also
+currently have our file system tied to the 1MB size, which is a problem.
+Another issue present in our file system is that we allocate memory in 4k pages.
+This is probably larger than we would truly prefer. If we were to work on this
+project further we would have smaller blocks of memory and more than one direct
+block per inode.
+
+A few advantages of our filesystem is that we can use random blocks to compose 
+a file, but it will also prefer sequential blocks when allocating files.
+
+If we had more time I would also clean up the code. We wrote a fair amount of
+utility functions which would have made writing the code easier in the
+beginning.
+
+We implemented all of the required features, no more, no less. If you count it
+we added the ability to hard link, which wasn't written in the nufs.c starter
+code, but it was tested for so I consider it required. So our definition of
+required here is that it was stubbed in the starter code.
