@@ -4,3 +4,4 @@ mnt
 nufs
 test
 test_fs
+*.log
