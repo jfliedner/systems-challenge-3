@@ -102,7 +102,7 @@ int
 nufs_mkdir(const char *path, mode_t mode)
 {
     printf("mkdir(%s)\n", path);
-    return -1;
+    return create_dir_inode(path, mode);
 }
 
 int
@@ -167,13 +167,6 @@ int
 nufs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
 {
     printf("read(%s, %ld bytes, @%ld)\n", path, size, offset);
-    /*read_data* data = get_data(path, size, offset);
-
-    int readSize = (data->size < size) ? data->size : size;
-    strlcpy(buf, data->data, readSize);
-    if (data->size < size) {
-      buf[data->size] = 0;
-    }*/
     return read_path(path, buf, size, offset);
 }
 

@@ -637,3 +637,23 @@ get_new_inode(const char* path, mode_t mode, dev_t dev) {
   //printf("Giving inode %d\n", newInodeId);
   return newInodeId;
 }
+
+int
+create_dir_inode(const char* path, mode_t mode) {
+  int inodeId = get_new_inode(path, mode, 0);
+  inode* node = &meta->inodes[inodeId];
+  printf("mode=%d\n", mode);
+  node->mode = mode | S_IFDIR;
+  string_array* arr = parse_path((char*) path);
+  char* basename = get_last(arr);
+  // TODO: do we actually are about the pnum field?
+  directory* dir = create_directory(basename, inodeId, 0);
+  void* serialDir = serialize(dir);
+
+  write_to_inode(node, serialDir, get_size_directory(dir), 0);
+
+  free(serialDir);
+  free_directory(dir);
+  free_string_array(arr);
+  return 0;
+}

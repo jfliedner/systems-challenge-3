@@ -56,7 +56,14 @@ create_directory(char* name, long inodeId, long pnum) {
 char*
 get_file_start(directory* dir) {
     char* start = strstr(dir->paths, "/");
-    while (start && (*start == '/' || isdigit(*start) || *start == '-')) {
+    int haveSeenBackslash = 0;
+    while (start && (*start == '/' ||
+                     (isdigit(*start) && !haveSeenBackslash) ||
+                     *start == '-' ||
+                     *start == '\\')) {
+        if (*start == '\\') {
+          haveSeenBackslash = 1;
+        }
         ++start;
     }
     if (*start) {
@@ -70,7 +77,7 @@ get_file_start(directory* dir) {
 int
 add_file(directory* dir, char* name, long inodeId) {
     if (isdigit(*name)) {
-        return -EINVAL;
+        name = smart_cat("\\", name);
     }
     if (dir->paths) {
         dir->paths = smart_cat(dir->paths, name);
@@ -186,15 +193,23 @@ get_file_names(directory* dir, char*** namesPointer) {
   long currentLength = 0;
   char* fileNameStart = get_file_start(dir);
   int currentStart = 0;
+  int haveSeenBackslash = 0;
   for (int i = 0; i < strlen(fileNameStart); ++i) {
     char currentChar = fileNameStart[i];
     if (currentChar == '/') {
-      names[nameIndex] = malloc(sizeof(char) * (currentLength + 1));
-      strncpy(names[nameIndex], &fileNameStart[currentStart], currentLength);
-      names[nameIndex][currentLength] = 0;
-      ++nameIndex;
+      while(fileNameStart[currentStart] && fileNameStart[currentStart] == '\\') {
+        ++currentStart;
+        --currentLength;
+      }
+      if (fileNameStart[currentStart]) {
+        names[nameIndex] = malloc(sizeof(char) * (currentLength + 1));
+        strncpy(names[nameIndex], &fileNameStart[currentStart], currentLength);
+        names[nameIndex][currentLength] = 0;
+        ++nameIndex;
+      }
       inName = 0;
       currentLength = 0;
+      haveSeenBackslash = 0;
     }
     if (!inName && !isdigit(currentChar) && currentChar != '-' && currentChar != '/') {
       inName = 1;

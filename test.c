@@ -154,6 +154,28 @@ test_distinguish_swap_files() {
 }
 
 void
+test_can_have_file_name_start_with_digit() {
+  directory* dir = create_directory("", -1, -1);
+  add_file(dir, "2k.txt", 0);
+  assert(get_file_inode(dir, "2k.txt") == 0);
+  free_directory(dir);
+}
+
+void
+test_no_leading_bslash_in_filename() {
+  directory* dir = create_directory("", -1, -1);
+  add_file(dir, "normal", 0);
+  add_file(dir, "2k.txt", 1);
+  add_file(dir, "othernormal", 2);
+  char** fileNames;
+  assert(get_file_names(dir, &fileNames) == 3);
+  assert(strcmp(fileNames[0], "normal") == 0);
+  assert(strcmp(fileNames[1], "2k.txt") == 0);
+  assert(strcmp(fileNames[2], "othernormal") == 0);
+  free_directory(dir);
+}
+
+void
 test_directory() {
   test_add_file();
   test_get_inode_num();
@@ -169,6 +191,8 @@ test_directory() {
   test_get_multiple_file_names();
   test_has_file();
   test_distinguish_swap_files();
+  test_can_have_file_name_start_with_digit();
+  test_no_leading_bslash_in_filename();
 }
 
 void
